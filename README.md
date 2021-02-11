@@ -1,3 +1,7 @@
 # astra-mgmt-go
 
-Go API bindings for the Astra Management API
+Go API bindings for the Astra Management API with zero external dependencies.
+
+## License
+
+Apache 2.0
