@@ -23,8 +23,6 @@ import (
 	"net/http"
 	"strconv"
 	"time"
-
-	"github.com/prometheus/common/log"
 )
 
 // Authenticate returns a token from the service account
@@ -80,8 +78,6 @@ func Authenticate(clientName, clientId, clientSecret string) (*AuthenticatedClie
 	if token, ok := tokenResponse["token"]; !ok {
 		return &AuthenticatedClient{}, fmt.Errorf("unable to find token in json: %s", payload)
 	} else {
-		log.Infof("response is %v", tokenResponse)
-		log.Infof("token is %s", token)
 		return &AuthenticatedClient{
 			client: c,
 			token:  fmt.Sprintf("Bearer %s", token),
@@ -95,15 +91,23 @@ type AuthenticatedClient struct {
 	client *http.Client
 }
 
+const serviceUrl = "https://api.astra.datastax.com/v2/databases"
+
+func (a *AuthenticatedClient) setHeaders(req *http.Request) {
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", a.token)
+	req.Header.Set("Content-Type", "application/json")
+}
+
+// ListDb find all databases that match the parameters
+// include, provider, startingAfter and limit are all optional
 func (a *AuthenticatedClient) ListDb(include string, provider string, startingAfter string, limit int32) ([]DataBase, error) {
 	var dbs []DataBase
-	url := "https://api.astra.datastax.com/v2/databases"
-	req, err := http.NewRequest("GET", url, http.NoBody)
+	req, err := http.NewRequest("GET", serviceUrl, http.NoBody)
 	if err != nil {
 		return dbs, fmt.Errorf("failed creating request with: %w", err)
 	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Authorization", a.token)
+	a.setHeaders(req)
 	q := req.URL.Query()
 	if len(include) > 0 {
 		q.Add("include", include)
@@ -135,6 +139,233 @@ func (a *AuthenticatedClient) ListDb(include string, provider string, startingAf
 		return []DataBase{}, fmt.Errorf("unable to decode response with error: %w", err)
 	}
 	return dbs, nil
+}
+
+// CreateDb creates a database in Astra, all fields are required
+func (a *AuthenticatedClient) CreateDb(name, keyspace, region, dbUser, dbPass, tier string, capacityUnits int) error {
+	createDb := map[string]interface{}{
+		"name":          name,
+		"keyspace":      keyspace,
+		"capacityUnits": capacityUnits,
+		"region":        region,
+		"user":          dbUser,
+		"password":      dbPass,
+		"tier":          tier,
+	}
+	body, err := json.Marshal(createDb)
+	if err != nil {
+		return fmt.Errorf("unable to marshall create db json with: %w", err)
+	}
+	req, err := http.NewRequest("POST", serviceUrl, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("failed creating request with: %w", err)
+	}
+	a.setHeaders(req)
+	res, err := a.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed creating database with: %w", err)
+	}
+	if res.StatusCode != 200 {
+		var resObj map[string]interface{}
+		err = json.NewDecoder(res.Body).Decode(&resObj)
+		if err != nil {
+			return fmt.Errorf("unable to decode error response with error: %w", err)
+		}
+		return fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj["errors"])
+	}
+	return nil
+}
+
+// FinDb finds the database at the specified id
+func (a *AuthenticatedClient) FindDb(id string) (DataBase, error) {
+	var dbs DataBase
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/%s", serviceUrl, id), http.NoBody)
+	if err != nil {
+		return dbs, fmt.Errorf("failed creating request to find db with id %s with: %w", id, err)
+	}
+	a.setHeaders(req)
+	res, err := a.client.Do(req)
+	if err != nil {
+		return dbs, fmt.Errorf("failed get database id %s with: %w", id, err)
+	}
+	if res.StatusCode != 200 {
+		var resObj map[string]interface{}
+		err = json.NewDecoder(res.Body).Decode(&resObj)
+		if err != nil {
+			return DataBase{}, fmt.Errorf("unable to decode error response with error: %w", err)
+		}
+		return DataBase{}, fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj["errors"])
+	}
+	err = json.NewDecoder(res.Body).Decode(&dbs)
+	if err != nil {
+		return DataBase{}, fmt.Errorf("unable to decode response with error: %w", err)
+	}
+	return dbs, nil
+}
+
+// AddKeyspaceToDb adds a keyspace to the database at the specified id
+func (a *AuthenticatedClient) AddKeyspaceToDb(dbId, keyspaceName string) error {
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/keyspaces/%s", serviceUrl, dbId, keyspaceName), http.NoBody)
+	if err != nil {
+		return fmt.Errorf("failed creating request to add keyspace to db with id %s with: %w", dbId, err)
+	}
+	a.setHeaders(req)
+	res, err := a.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to add keyspace to db id %s with: %w", dbId, err)
+	}
+	if res.StatusCode != 200 {
+		var resObj map[string]interface{}
+		err = json.NewDecoder(res.Body).Decode(&resObj)
+		if err != nil {
+			return fmt.Errorf("unable to decode error response with error: %w", err)
+		}
+		return fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj["errors"])
+	}
+	return nil
+}
+
+// GetSecureBundle finds the secure bundle connection information for the database at the specified id
+func (a *AuthenticatedClient) GetSecureBundle(id string) (SecureBundle, error) {
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/%s/secureBundleURL", serviceUrl, id), http.NoBody)
+	if err != nil {
+		return SecureBundle{}, fmt.Errorf("failed creating request to get secure bundle for db with id %s with: %w", id, err)
+	}
+	a.setHeaders(req)
+	res, err := a.client.Do(req)
+	if err != nil {
+		return SecureBundle{}, fmt.Errorf("failed get secure bundle for database id %s with: %w", id, err)
+	}
+	if res.StatusCode != 200 {
+		var resObj map[string]interface{}
+		err = json.NewDecoder(res.Body).Decode(&resObj)
+		if err != nil {
+			return SecureBundle{}, fmt.Errorf("unable to decode error response with error: %w", err)
+		}
+		return SecureBundle{}, fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj["errors"])
+	}
+	var sb SecureBundle
+	err = json.NewDecoder(res.Body).Decode(&sb)
+	if err != nil {
+		return SecureBundle{}, fmt.Errorf("unable to decode response with error: %w", err)
+	}
+	return sb, nil
+}
+
+// Terminate deletes the database at the specified id, preparedStateOnly can be left to false in almost all cases
+// and is included only for completeness
+func (a *AuthenticatedClient) Terminate(id string, preparedStateOnly bool) error {
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/terminate", serviceUrl, id), http.NoBody)
+	if err != nil {
+		return fmt.Errorf("failed creating request to terminate db with id %s with: %w", id, err)
+	}
+	a.setHeaders(req)
+	q := req.URL.Query()
+	q.Add("preparedStateOnly", strconv.FormatBool(preparedStateOnly))
+	req.URL.RawQuery = q.Encode()
+	res, err := a.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to terminate database id %s with: %w", id, err)
+	}
+	if res.StatusCode != 200 {
+		var resObj map[string]interface{}
+		err = json.NewDecoder(res.Body).Decode(&resObj)
+		if err != nil {
+			return fmt.Errorf("unable to decode error response with error: %w", err)
+		}
+		return fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj["errors"])
+	}
+	return nil
+}
+
+// Park parks the database at the specified id
+func (a *AuthenticatedClient) Park(id string) error {
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/park", serviceUrl, id), http.NoBody)
+	if err != nil {
+		return fmt.Errorf("failed creating request to park db with id %s with: %w", id, err)
+	}
+	a.setHeaders(req)
+	res, err := a.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to park database id %s with: %w", id, err)
+	}
+	if res.StatusCode != 200 {
+		var resObj map[string]interface{}
+		err = json.NewDecoder(res.Body).Decode(&resObj)
+		if err != nil {
+			return fmt.Errorf("unable to decode error response with error: %w", err)
+		}
+		return fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj["errors"])
+	}
+	return nil
+}
+
+// UnPark unparks the database at the specified id
+func (a *AuthenticatedClient) UnPark(id string) error {
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/unpark", serviceUrl, id), http.NoBody)
+	if err != nil {
+		return fmt.Errorf("failed creating request to unpark db with id %s with: %w", id, err)
+	}
+	a.setHeaders(req)
+	res, err := a.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to unpark database id %s with: %w", id, err)
+	}
+	if res.StatusCode != 200 {
+		var resObj map[string]interface{}
+		err = json.NewDecoder(res.Body).Decode(&resObj)
+		if err != nil {
+			return fmt.Errorf("unable to decode error response with error: %w", err)
+		}
+		return fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj["errors"])
+	}
+	return nil
+}
+
+// Resize changes the storage size for the database at the specified id
+func (a *AuthenticatedClient) Resize(id string, capacityUnits int32) error {
+	body := fmt.Sprintf("{\"capacityUnits\":%d}", capacityUnits)
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/resize", serviceUrl, id), bytes.NewBufferString(body))
+	if err != nil {
+		return fmt.Errorf("failed creating request to unpark db with id %s with: %w", id, err)
+	}
+	a.setHeaders(req)
+	res, err := a.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to unpark database id %s with: %w", id, err)
+	}
+	if res.StatusCode != 200 {
+		var resObj map[string]interface{}
+		err = json.NewDecoder(res.Body).Decode(&resObj)
+		if err != nil {
+			return fmt.Errorf("unable to decode error response with error: %w", err)
+		}
+		return fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj["errors"])
+	}
+	return nil
+}
+
+// ResetPassword changes the password for the database at the specified id
+func (a *AuthenticatedClient) ResetPassword(id, username, password string) error {
+	body := fmt.Sprintf("{\"username\":\"%s\",\"password\":\"%s\"}", username, password)
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/resetPassword", serviceUrl, id), bytes.NewBufferString(body))
+	if err != nil {
+		return fmt.Errorf("failed creating request to reset password for db with id %s with: %w", id, err)
+	}
+	a.setHeaders(req)
+	res, err := a.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to reset password for database id %s with: %w", id, err)
+	}
+	if res.StatusCode != 200 {
+		var resObj map[string]interface{}
+		err = json.NewDecoder(res.Body).Decode(&resObj)
+		if err != nil {
+			return fmt.Errorf("unable to decode error response with error: %w", err)
+		}
+		return fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj["errors"])
+	}
+	return nil
 }
 
 // Info is some database meta data info
@@ -176,4 +407,11 @@ type DataBase struct {
 	CqlshUrl         string   `json:"cqlshUrl"`
 	GraphqlUrl       string   `json:"graphUrl"`
 	DataEndpointUrl  string   `json:"dataEndpointUrl"`
+}
+
+// SecureBundle connection information
+type SecureBundle struct {
+	DownloadURL               string `json:"downloadURL"`
+	DownloadURLInternal       string `json:"downloadURLInternal"`
+	DownloadURLMigrationProxy string `json:"downloadURLMigrationProxy"`
 }
