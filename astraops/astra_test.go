@@ -16,26 +16,74 @@ Copyright 2021 Ryan Svihla
 package astraops
 
 import (
-	"os"
+	"encoding/json"
+	"io/ioutil"
+	"log"
+	"os/user"
+	"path"
 	"testing"
-
-	"github.com/prometheus/common/log"
 )
 
-var ClientId = os.Getenv("ASTRA_TEST_CLIENT_ID")
-var ClientSecret = os.Getenv("ASTRA_TEST_CLIENT_SECRET")
-var ClientName = os.Getenv("ASTRA_TEST_CLIENT_NAME")
+type ClientInfo struct {
+	ClientName   string `json:"clientName"`
+	ClientId     string `json:"clientId"`
+	ClientSecret string `json:"clientSecret"`
+}
+
+func getClientInfo() ClientInfo {
+	u, err := user.Current()
+	if err != nil {
+		log.Fatal(err)
+	}
+	saFile := path.Join(u.HomeDir, ".config", "astra", "sa.json")
+	b, err := ioutil.ReadFile(saFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+	var clientInfo ClientInfo
+	if err = json.Unmarshal(b, &clientInfo); err != nil {
+		log.Fatalf("unable to convert %s to json object with error %v", saFile, err)
+	}
+	return clientInfo
+}
 
 func TestListDb(t *testing.T) {
-	client, err := Authenticate(ClientName, ClientId, ClientSecret)
+	c := getClientInfo()
+	client, err := Authenticate(c.ClientName, c.ClientId, c.ClientSecret)
 	if err != nil {
 		t.Fatalf("failed authentication %v", err)
 	}
+	createDb := CreateDb{
+		Name:          "mydb",
+		Keyspace:      "mykeyspace",
+		Region:        "europe-west1",
+		CloudProvider: "GCP",
+		CapacityUnits: 1,
+		Tier:          "free",
+		User:          "myuser",
+		Password:      "fdqji2389",
+	}
+	err = client.CreateDb(createDb)
+	if err != nil {
+		t.Fatalf("failed creating db  %v", err)
+	}
+	defer func() {
+		if err := client.Terminate(createDb.Name, false); err != nil {
+			t.Logf("warning error deleting created db %s up %s", createDb.Name, err)
+		}
+	}()
 	dbs, err := client.ListDb("", "", "", 10)
 	if err != nil {
 		t.Fatalf("failed retrieving db %v", err)
 	}
+	found := false
 	for _, db := range dbs {
-		log.Debug(db)
+		if db.Info.Name == createDb.Name {
+			log.Print("found newly created db")
+			found = true
+		}
+	}
+	if found {
+		t.Errorf("did not found newly created db in %v", dbs)
 	}
 }

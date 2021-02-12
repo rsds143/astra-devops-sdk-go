@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -142,17 +143,8 @@ func (a *AuthenticatedClient) ListDb(include string, provider string, startingAf
 }
 
 // CreateDb creates a database in Astra, all fields are required
-func (a *AuthenticatedClient) CreateDb(name, keyspace, region, dbUser, dbPass, tier string, capacityUnits int) error {
-	createDb := map[string]interface{}{
-		"name":          name,
-		"keyspace":      keyspace,
-		"capacityUnits": capacityUnits,
-		"region":        region,
-		"user":          dbUser,
-		"password":      dbPass,
-		"tier":          tier,
-	}
-	body, err := json.Marshal(createDb)
+func (a *AuthenticatedClient) CreateDb(createDb CreateDb) error {
+	body, err := json.Marshal(&createDb)
 	if err != nil {
 		return fmt.Errorf("unable to marshall create db json with: %w", err)
 	}
@@ -173,6 +165,12 @@ func (a *AuthenticatedClient) CreateDb(name, keyspace, region, dbUser, dbPass, t
 		}
 		return fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj["errors"])
 	}
+	var resObj map[string]interface{}
+	err = json.NewDecoder(res.Body).Decode(&resObj)
+	if err != nil {
+		return fmt.Errorf("unable to decode error response with error: %w", err)
+	}
+	log.Printf("response is %v", resObj)
 	return nil
 }
 
@@ -368,6 +366,34 @@ func (a *AuthenticatedClient) ResetPassword(id, username, password string) error
 	return nil
 }
 
+// GetTierInfo retrieve the current tier info, availability and cost
+func (a *AuthenticatedClient) GetTierInfo() ([]TierInfo, error) {
+	var ti []TierInfo
+	req, err := http.NewRequest("GET", "https://api.astra.datastax.com/v2/availableRegions", http.NoBody)
+	if err != nil {
+		return []TierInfo{}, fmt.Errorf("failed creating request for tier info with: %w", err)
+	}
+	a.setHeaders(req)
+
+	res, err := a.client.Do(req)
+	if err != nil {
+		return []TierInfo{}, fmt.Errorf("failed listing tier info with: %w", err)
+	}
+	if res.StatusCode != 200 {
+		var resObj map[string]interface{}
+		err = json.NewDecoder(res.Body).Decode(&resObj)
+		if err != nil {
+			return []TierInfo{}, fmt.Errorf("unable to decode error response with error: %w", err)
+		}
+		return []TierInfo{}, fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj["errors"])
+	}
+	err = json.NewDecoder(res.Body).Decode(&ti)
+	if err != nil {
+		return []TierInfo{}, fmt.Errorf("unable to decode response with error: %w", err)
+	}
+	return ti, nil
+}
+
 // Info is some database meta data info
 type Info struct {
 	Name                string         `json:"name"`
@@ -414,4 +440,51 @@ type SecureBundle struct {
 	DownloadURL               string `json:"downloadURL"`
 	DownloadURLInternal       string `json:"downloadURLInternal"`
 	DownloadURLMigrationProxy string `json:"downloadURLMigrationProxy"`
+}
+
+// TierCost breaks down the cost items of a given region
+type TierCost struct {
+	CostPerMinCents         float64 `json:"costPerMinCents"`
+	CostPerHourCents        float64 `json:"costPerHourCents"`
+	CostPerDayCents         float64 `json:"costPerDayCents"`
+	CostPerMonthCents       float64 `json:"costPerMonthCents"`
+	CostPerMinMRCents       float64 `json:"costPerMinMRCents"`
+	CostPerHourMRCents      float64 `json:"costPerHourMRCents"`
+	CostPerDayMRCents       float64 `json:"costPerDayMRCents"`
+	CostPerMonthMRCents     float64 `json:"costPerMonthMRCents"`
+	CostPerMinParkedCents   float64 `json:"costPerMinParkedCents"`
+	CostPerHourParkedCents  float64 `json:"costPerHourParkedCents"`
+	CostPerDayParkedCents   float64 `json:"costPerDayParkedCents"`
+	CostPerMonthParkedCents float64 `json:"costPerMonthParkedCents"`
+	CostPerNetworkGbCents   float64 `json:"costPerNetworkGbCents"`
+	CostPerWrittenGbCents   float64 `json:"costPerWrittenGbCents"`
+	CostPerReadGbCents      float64 `json:"costPerReadGbCents"`
+}
+
+// TierInfo shows the databases availability information
+type TierInfo struct {
+	Tier                            string   `json:"tier"`
+	Description                     string   `json:"description"`
+	CloudProvider                   string   `json:"cloudProvider"`
+	Region                          string   `json:"region"`
+	RegionDisplay                   string   `json:"regionDisplay"`
+	RegionContinent                 string   `json:"regionContinent"`
+	Cost                            TierCost `json:"cost"`
+	DatabaseCountUsed               int      `json:"databaseCountUsed"`
+	DatabaseCountLimit              int      `json:"databaseCountLimit"`
+	CapacityUnitsUsed               int      `json:"capacityUnitsUsed"`
+	CapacityUnitsLimit              int      `json:"capacityUnitsLimit"`
+	DefaultStoragePerCapacityUnitGb int      `json:"defaultStoragePerCapacityUnitGb"`
+}
+
+// CreateDb object for submitting a new database
+type CreateDb struct {
+	Name          string `json:"name"`
+	Keyspace      string `json:"keyspace"`
+	CapacityUnits int    `json:"capacityUnits"`
+	Region        string `json:"region"`
+	User          string `json:"user"`
+	Password      string `json:"password"`
+	Tier          string `json:"tier"`
+	CloudProvider string `json:"cloudProvider"`
 }
