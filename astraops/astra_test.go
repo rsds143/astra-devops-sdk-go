@@ -1,5 +1,5 @@
 /**
-Copyright 2021 Ryan Svihla
+	Copyright 2021 Ryan Svihla
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import (
 	"os/user"
 	"path"
 	"testing"
+	"time"
 )
 
 type ClientInfo struct {
@@ -63,27 +64,33 @@ func TestListDb(t *testing.T) {
 		User:          "myuser",
 		Password:      "fdqji2389",
 	}
-	err = client.CreateDb(createDb)
+	id, err := client.CreateDb(createDb)
 	if err != nil {
-		t.Fatalf("failed creating db  %v", err)
+		t.Fatalf("failed creating db %v", err)
 	}
+	t.Logf("id is '%s'", id)
 	defer func() {
-		if err := client.Terminate(createDb.Name, false); err != nil {
-			t.Logf("warning error deleting created db %s up %s", createDb.Name, err)
+		if id != "" {
+			if err := client.Terminate(id, false); err != nil {
+				t.Logf("warning error deleting created db %s up %s", createDb.Name, err)
+			}
 		}
 	}()
+	time.Sleep(120 * time.Second)
 	dbs, err := client.ListDb("", "", "", 10)
 	if err != nil {
 		t.Fatalf("failed retrieving db %v", err)
 	}
 	found := false
 	for _, db := range dbs {
-		if db.Info.Name == createDb.Name {
+		log.Printf("id: '%v'", db.Id)
+		if db.Id == id {
 			log.Print("found newly created db")
 			found = true
+			break
 		}
 	}
-	if found {
-		t.Errorf("did not found newly created db in %v", dbs)
+	if !found {
+		t.Errorf("did not find newly created db in %v", dbs)
 	}
 }

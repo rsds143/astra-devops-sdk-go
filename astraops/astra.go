@@ -1,5 +1,5 @@
 /**
-Copyright 2021 Ryan Svihla
+	Copyright 2021 Ryan Svihla
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -107,7 +106,7 @@ func (a *AuthenticatedClient) ListDb(include string, provider string, startingAf
 	var dbs []DataBase
 	req, err := http.NewRequest("GET", serviceUrl, http.NoBody)
 	if err != nil {
-		return dbs, fmt.Errorf("failed creating request with: %w", err)
+		return dbs, fmt.Errorf("failed creating request with: %v", err)
 	}
 	a.setHeaders(req)
 	q := req.URL.Query()
@@ -126,62 +125,55 @@ func (a *AuthenticatedClient) ListDb(include string, provider string, startingAf
 	req.URL.RawQuery = q.Encode()
 	res, err := a.client.Do(req)
 	if err != nil {
-		return dbs, fmt.Errorf("failed listing databases with: %w", err)
+		return dbs, fmt.Errorf("failed listing databases with: %v", err)
 	}
 	if res.StatusCode != 200 {
 		var resObj map[string]interface{}
 		err = json.NewDecoder(res.Body).Decode(&resObj)
 		if err != nil {
-			return []DataBase{}, fmt.Errorf("unable to decode error response with error: %w", err)
+			return []DataBase{}, fmt.Errorf("unable to decode error response with error: %v for status code %v", err, res.StatusCode)
 		}
 		return []DataBase{}, fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj["errors"])
 	}
 	err = json.NewDecoder(res.Body).Decode(&dbs)
 	if err != nil {
-		return []DataBase{}, fmt.Errorf("unable to decode response with error: %w", err)
+		return []DataBase{}, fmt.Errorf("unable to decode response with error: %v", err)
 	}
 	return dbs, nil
 }
 
 // CreateDb creates a database in Astra, all fields are required
-func (a *AuthenticatedClient) CreateDb(createDb CreateDb) error {
+func (a *AuthenticatedClient) CreateDb(createDb CreateDb) (string, error) {
 	body, err := json.Marshal(&createDb)
 	if err != nil {
-		return fmt.Errorf("unable to marshall create db json with: %w", err)
+		return "", fmt.Errorf("unable to marshall create db json with: %w", err)
 	}
 	req, err := http.NewRequest("POST", serviceUrl, bytes.NewBuffer(body))
 	if err != nil {
-		return fmt.Errorf("failed creating request with: %w", err)
+		return "", fmt.Errorf("failed creating request with: %w", err)
 	}
 	a.setHeaders(req)
 	res, err := a.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed creating database with: %w", err)
+		return "", fmt.Errorf("failed creating database with: %w", err)
 	}
 	if res.StatusCode != 201 {
-		var resObj map[string]interface{}
+		var resObj ErrorResponse
 		err = json.NewDecoder(res.Body).Decode(&resObj)
 		if err != nil {
-			return fmt.Errorf("unable to decode error response with error: '%v'. status code was %v", err, res.StatusCode)
+			return "", fmt.Errorf("unable to decode error response with error: '%v'. status code was %v", err, res.StatusCode)
 		}
 		var errorMsgs []string
-		for _, x := range resObj["errors"].([]interface{}) {
-			for k, v := range x.(map[string]interface{}) {
-				errorMsgs = append(errorMsgs, fmt.Sprintf("%v - %v", k, v))
-			}
+		for _, e := range resObj.Errors {
+			errorMsgs = append(errorMsgs, fmt.Sprintf("ID: %v, Message: %v", e.ID, e.Message))
 		}
-		return fmt.Errorf("expected status code 201 but had: %v error was %s", res.StatusCode, strings.Join(errorMsgs, ","))
+		return "", fmt.Errorf("expected status code 201 but had: %v error was %s", res.StatusCode, strings.Join(errorMsgs, ","))
 	}
-	var resObj map[string]interface{}
-	err = json.NewDecoder(res.Body).Decode(&resObj)
-	if err != nil {
-		return fmt.Errorf("unable to decode error response with error: %w", err)
-	}
-	log.Printf("response is %v", resObj)
-	return nil
+	id := strings.TrimSpace(res.Header.Get("location"))
+	return id, nil
 }
 
-// FinDb finds the database at the specified id
+// FindDb finds the database at the specified id
 func (a *AuthenticatedClient) FindDb(id string) (DataBase, error) {
 	var dbs DataBase
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/%s", serviceUrl, id), http.NoBody)
@@ -272,13 +264,13 @@ func (a *AuthenticatedClient) Terminate(id string, preparedStateOnly bool) error
 	if err != nil {
 		return fmt.Errorf("failed to terminate database id %s with: %w", id, err)
 	}
-	if res.StatusCode != 200 {
-		var resObj map[string]interface{}
+	if res.StatusCode != 202 {
+		var resObj ErrorResponse
 		err = json.NewDecoder(res.Body).Decode(&resObj)
 		if err != nil {
-			return fmt.Errorf("unable to decode error response with error: %w", err)
+			return fmt.Errorf("unable to decode error response with error: %w, status code was %v", err, res.StatusCode)
 		}
-		return fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj["errors"])
+		return fmt.Errorf("expected status code 202 but had: %v error was %v", res.StatusCode, resObj.Errors)
 	}
 	return nil
 }
@@ -494,4 +486,15 @@ type CreateDb struct {
 	Password      string `json:"password"`
 	Tier          string `json:"tier"`
 	CloudProvider string `json:"cloudProvider"`
+}
+
+// ErrorResponse when the API has an error
+type ErrorResponse struct {
+	Errors []ApiError `json:"errors"`
+}
+
+// ApiError when the api has an error this is the structure
+type ApiError struct {
+	ID      int64
+	Message string `json:"message"`
 }
