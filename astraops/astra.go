@@ -23,6 +23,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -157,13 +158,19 @@ func (a *AuthenticatedClient) CreateDb(createDb CreateDb) error {
 	if err != nil {
 		return fmt.Errorf("failed creating database with: %w", err)
 	}
-	if res.StatusCode != 200 {
+	if res.StatusCode != 201 {
 		var resObj map[string]interface{}
 		err = json.NewDecoder(res.Body).Decode(&resObj)
 		if err != nil {
-			return fmt.Errorf("unable to decode error response with error: %w", err)
+			return fmt.Errorf("unable to decode error response with error: '%v'. status code was %v", err, res.StatusCode)
 		}
-		return fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj["errors"])
+		var errorMsgs []string
+		for _, x := range resObj["errors"].([]interface{}) {
+			for k, v := range x.(map[string]interface{}) {
+				errorMsgs = append(errorMsgs, fmt.Sprintf("%v - %v", k, v))
+			}
+		}
+		return fmt.Errorf("expected status code 201 but had: %v error was %s", res.StatusCode, strings.Join(errorMsgs, ","))
 	}
 	var resObj map[string]interface{}
 	err = json.NewDecoder(res.Body).Decode(&resObj)
