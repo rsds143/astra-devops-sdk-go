@@ -17,17 +17,18 @@ package astraops
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"os/user"
 	"path"
 	"testing"
-	"time"
 )
 
 type ClientInfo struct {
 	ClientName   string `json:"clientName"`
-	ClientId     string `json:"clientId"`
+	ClientID     string `json:"clientId"`
 	ClientSecret string `json:"clientSecret"`
 }
 
@@ -50,7 +51,7 @@ func getClientInfo() ClientInfo {
 
 func TestListDb(t *testing.T) {
 	c := getClientInfo()
-	client, err := Authenticate(c.ClientName, c.ClientId, c.ClientSecret)
+	client, err := Authenticate(c.ClientName, c.ClientID, c.ClientSecret)
 	if err != nil {
 		t.Fatalf("failed authentication %v", err)
 	}
@@ -61,10 +62,10 @@ func TestListDb(t *testing.T) {
 		CloudProvider: "GCP",
 		CapacityUnits: 1,
 		Tier:          "free",
-		User:          "myuser",
-		Password:      "fdqji2389",
+		User:          fmt.Sprintf("a%v", rand.Int63()),
+		Password:      fmt.Sprintf("b%v", rand.Int63()),
 	}
-	id, err := client.CreateDb(createDb)
+	id, _, err := client.CreateDb(createDb)
 	if err != nil {
 		t.Fatalf("failed creating db %v", err)
 	}
@@ -76,15 +77,14 @@ func TestListDb(t *testing.T) {
 			}
 		}
 	}()
-	time.Sleep(120 * time.Second)
 	dbs, err := client.ListDb("", "", "", 10)
 	if err != nil {
 		t.Fatalf("failed retrieving db %v", err)
 	}
 	found := false
 	for _, db := range dbs {
-		log.Printf("id: '%v'", db.Id)
-		if db.Id == id {
+		log.Printf("id: '%v'", db.ID)
+		if db.ID == id {
 			log.Print("found newly created db")
 			found = true
 			break
@@ -92,5 +92,46 @@ func TestListDb(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("did not find newly created db in %v", dbs)
+	}
+}
+
+func TestParkDb(t *testing.T) {
+	c := getClientInfo()
+	client, err := Authenticate(c.ClientName, c.ClientID, c.ClientSecret)
+	if err != nil {
+		t.Fatalf("failed authentication %v", err)
+	}
+	createDb := CreateDb{
+		Name:          "mydb",
+		Keyspace:      "mykeyspace",
+		Region:        "europe-west1",
+		CloudProvider: "GCP",
+		CapacityUnits: 1,
+		Tier:          "free",
+		User:          fmt.Sprintf("a%v", rand.Int63()),
+		Password:      fmt.Sprintf("b%v", rand.Int63()),
+	}
+	id, _, err := client.CreateDb(createDb)
+	if err != nil {
+		t.Fatalf("failed creating db %v", err)
+	}
+	t.Logf("id is '%s'", id)
+	defer func() {
+		if id != "" {
+			if err := client.Terminate(id, false); err != nil {
+				t.Logf("warning error deleting created db %s up %s", createDb.Name, err)
+			}
+		}
+	}()
+	err = client.Park(id)
+	if err != nil {
+		t.Fatalf("park failed with error %v", err)
+	}
+	db, err := client.FindDb(id)
+	if err != nil {
+		t.Fatalf("unable to find parked db with error %v", err)
+	}
+	if db.Status != "PARKED" {
+		t.Fatalf("expected db to be parked but was %v", db.Status)
 	}
 }
