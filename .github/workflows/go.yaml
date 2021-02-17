@@ -28,5 +28,12 @@ jobs:
         with:
           stable: 'false'
           go-version: '1.15.8'
+      - shell: bash
+        run: mkdir "$HOME/.config/astra/sa.json"
+      - shell: bash
+        env:
+          SA: ${{ secrets.ASTRA_SERVICE_ACCOUNT }}
+        run: |
+          echo "$SA" > "$HOME/.config/astra/sa.json"
       - name: Lint
         run: go test -v ./...
