@@ -35,5 +35,5 @@ jobs:
           SA: ${{ secrets.ASTRA_SERVICE_ACCOUNT }}
         run: |
           echo "$SA" > "$HOME/.config/astra/sa.json"
-      - name: Lint
+      - name: Test
         run: go test -v ./...
