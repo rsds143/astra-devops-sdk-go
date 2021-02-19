@@ -26,11 +26,6 @@ import (
 	"testing"
 )
 
-type ClientInfo struct {
-	ClientName   string `json:"clientName"`
-	ClientID     string `json:"clientId"`
-	ClientSecret string `json:"clientSecret"`
-}
 
 func getClientInfo() ClientInfo {
 	u, err := user.Current()

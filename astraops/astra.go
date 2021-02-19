@@ -29,6 +29,13 @@ import (
 	"time"
 )
 
+// ClientInfo is a handy type for consumers but not used internally in the library other than for testing
+type ClientInfo struct {
+	ClientName   string `json:"clientName"`
+	ClientID     string `json:"clientId"`
+	ClientSecret string `json:"clientSecret"`
+}
+
 const (
 	Active = "ACTIVE"
 	Parked = "PARKED"
@@ -409,13 +416,13 @@ func (a *AuthenticatedClient) Resize(id string, capacityUnits int32) error {
 	if err != nil {
 		return fmt.Errorf("failed to unpark database id %s with: %w", id, err)
 	}
-	if res.StatusCode != 200 {
+	if res.StatusCode > 299 {
 		var resObj map[string]interface{}
 		err = json.NewDecoder(res.Body).Decode(&resObj)
 		if err != nil {
 			return fmt.Errorf("unable to decode error response with error: %w", err)
 		}
-		return fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj["errors"])
+		return fmt.Errorf("expected status code 2xx but had: %v error was %v", res.StatusCode, resObj["errors"])
 	}
 	return nil
 }
