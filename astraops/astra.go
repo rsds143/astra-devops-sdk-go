@@ -18,7 +18,6 @@
 package astraops
 
 import (
-    "io/ioutil"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -472,12 +471,7 @@ func (a *AuthenticatedClient) GetTierInfo() ([]TierInfo, error) {
 		}
 		return []TierInfo{}, fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj["errors"])
 	}
-	body, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		return []TierInfo{}, fmt.Errorf("unable to decode response with error: %w", err)
-	}
-	fmt.Println(string(body))
-	err = json.Unmarshal(body, &ti)
+	err = json.NewDecoder(res.Body).Decode(&ti)
 	if err != nil {
 		return []TierInfo{}, fmt.Errorf("unable to decode response with error: %w", err)
 	}
