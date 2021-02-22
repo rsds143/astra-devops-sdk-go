@@ -476,7 +476,7 @@ func (a *AuthenticatedClient) GetTierInfo() ([]TierInfo, error) {
 	if err != nil {
 		return []TierInfo{}, fmt.Errorf("unable to decode response with error: %w", err)
 	}
-	fmt.Println([]byte(body))
+	fmt.Println(string(body))
 	err = json.Unmarshal(body, &ti)
 	if err != nil {
 		return []TierInfo{}, fmt.Errorf("unable to decode response with error: %w", err)
