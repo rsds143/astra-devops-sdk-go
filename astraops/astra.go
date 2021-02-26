@@ -37,14 +37,14 @@ type ClientInfo struct {
 }
 
 const (
-	Active = "ACTIVE"
-	Parked = "PARKED"
-	Terminated = "TERMINATED"
+	Active      = "ACTIVE"
+	Parked      = "PARKED"
+	Terminated  = "TERMINATED"
 	Terminating = "TERMINATING"
 )
 
 // Authenticate returns a token from the service account
-func Authenticate(clientName, clientID, clientSecret string) (*AuthenticatedClient, error) {
+func Authenticate(clientInfo ClientInfo, verbose bool) (*AuthenticatedClient, error) {
 	url := "https://api.astra.datastax.com/v2/authenticateServiceAccount"
 	c := &http.Client{
 		Timeout: 5 * time.Second,
@@ -61,12 +61,7 @@ func Authenticate(clientName, clientID, clientSecret string) (*AuthenticatedClie
 			ExpectContinueTimeout: 1 * time.Second,
 		},
 	}
-	payload := map[string]interface{}{
-		"clientName":   clientName,
-		"clientId":     clientID,
-		"clientSecret": clientSecret,
-	}
-	body, err := json.Marshal(payload)
+	body, err := json.Marshal(clientInfo)
 	if err != nil {
 		return &AuthenticatedClient{}, fmt.Errorf("unable to marshal JSON object with: %w", err)
 	}
@@ -96,7 +91,7 @@ func Authenticate(clientName, clientID, clientSecret string) (*AuthenticatedClie
 	var token interface{}
 	var ok bool
 	if token, ok = tokenResponse["token"]; !ok {
-		return &AuthenticatedClient{}, fmt.Errorf("unable to find token in json: %s", payload)
+		return &AuthenticatedClient{}, fmt.Errorf("unable to find token in json: %s", tokenResponse)
 	}
 	return &AuthenticatedClient{
 		client: c,
@@ -106,8 +101,9 @@ func Authenticate(clientName, clientID, clientSecret string) (*AuthenticatedClie
 
 // AuthenticatedClient has a token and the methods to query the Astra DevOps API
 type AuthenticatedClient struct {
-	token  string
-	client *http.Client
+	token   string
+	client  *http.Client
+	verbose bool
 }
 
 const serviceURL = "https://api.astra.datastax.com/v2/databases"
@@ -187,7 +183,7 @@ func (a *AuthenticatedClient) CreateDb(createDb CreateDb) (string, DataBase, err
 		}
 		return "", DataBase{}, fmt.Errorf("expected status code 201 but had: %v error was %s", res.StatusCode, strings.Join(errorMsgs, ","))
 	}
-	id := strings.TrimSpace(res.Header.Get("location"))
+	id := res.Header.Get("location")
 	db, err := a.waitUntil(id, 20, 5, Active)
 	if err != nil {
 		return id, db, fmt.Errorf("create db failed because '%v'", err)
@@ -200,13 +196,21 @@ func (a *AuthenticatedClient) waitUntil(id string, tries int, intervalSeconds in
 		time.Sleep(time.Duration(intervalSeconds) * time.Second)
 		db, err := a.FindDb(id)
 		if err != nil {
-			log.Printf("db %s not able to find with error '%v' trying again %v more times", id, err, tries-i-1)
+			if a.verbose {
+				log.Printf("db %s not able to be found with error '%v' trying again %v more times", id, err, tries-i-1)
+			} else {
+				log.Printf("waiting")
+			}
 			continue
 		}
 		if db.Status == status {
 			return db, nil
 		}
-		log.Printf("db %s in state %v but expected %v trying again %v more times", id, db.Status, status, tries-i-1)
+		if a.verbose {
+			log.Printf("db %s in state %v but expected %v trying again %v more times", id, db.Status, status, tries-i-1)
+		} else {
+			log.Printf("waiting")
+		}
 	}
 	return DataBase{}, fmt.Errorf("unable to find db id %s with status %s after %v seconds", id, status, intervalSeconds*tries)
 }
@@ -330,15 +334,19 @@ func (a *AuthenticatedClient) Terminate(id string, preparedStateOnly bool) error
 			return nil
 		}
 		if res.StatusCode == 200 {
-		    var db DataBase
-		    err = json.NewDecoder(res.Body).Decode(&db)
-		    if err != nil {
-                return fmt.Errorf("critical error trying to get status of database not deleted, unable to decode response with error: %v", err)
-            }
-		    if db.Status == Terminated || db.Status == Terminating {
-		        return nil
-            }
-			log.Printf("db %s not deleted yet expected status code 401 or a 200 with a db Status of %v or %v but was 200 with a db status of %v. trying again", id, Terminated, Terminating, db.Status)
+			var db DataBase
+			err = json.NewDecoder(res.Body).Decode(&db)
+			if err != nil {
+				return fmt.Errorf("critical error trying to get status of database not deleted, unable to decode response with error: %v", err)
+			}
+			if db.Status == Terminated || db.Status == Terminating {
+				return nil
+			}
+			if a.verbose {
+				log.Printf("db %s not deleted yet expected status code 401 or a 200 with a db Status of %v or %v but was 200 with a db status of %v. trying again", id, Terminated, Terminating, db.Status)
+			} else {
+				log.Printf("waiting")
+			}
 			continue
 		}
 		var resObj map[string]interface{}
@@ -347,7 +355,12 @@ func (a *AuthenticatedClient) Terminate(id string, preparedStateOnly bool) error
 			return fmt.Errorf("unable to decode error response with error: %w status code was %v", err, res.StatusCode)
 		}
 		lastResponse = fmt.Sprintf("%v", resObj["errors"])
-		log.Printf("db %s not deleted yet expected status code 401 or a 200 with a db Status of %v or %v but was: %v and error was '%v'. trying again", id, Terminated, Terminating, res.StatusCode, lastResponse)
+
+		if a.verbose {
+			log.Printf("db %s not deleted yet expected status code 401 or a 200 with a db Status of %v or %v but was: %v and error was '%v'. trying again", id, Terminated, Terminating, res.StatusCode, lastResponse)
+		} else {
+			log.Printf("waiting")
+		}
 	}
 	return fmt.Errorf("delete of db %s not complete. Last response from finding db was '%v' and last status code was %v", id, lastResponse, lastStatusCode)
 }

@@ -26,7 +26,6 @@ import (
 	"testing"
 )
 
-
 func getClientInfo() ClientInfo {
 	u, err := user.Current()
 	if err != nil {
@@ -46,7 +45,7 @@ func getClientInfo() ClientInfo {
 
 func TestListDb(t *testing.T) {
 	c := getClientInfo()
-	client, err := Authenticate(c.ClientName, c.ClientID, c.ClientSecret)
+	client, err := Authenticate(c, true)
 	if err != nil {
 		t.Fatalf("failed authentication %v", err)
 	}
@@ -92,7 +91,7 @@ func TestListDb(t *testing.T) {
 
 func TestParkDb(t *testing.T) {
 	c := getClientInfo()
-	client, err := Authenticate(c.ClientName, c.ClientID, c.ClientSecret)
+	client, err := Authenticate(c, true)
 	if err != nil {
 		t.Fatalf("failed authentication %v", err)
 	}
