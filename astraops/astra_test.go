@@ -44,7 +44,7 @@ func getClientInfo() ClientInfo {
 }
 
 func TestListDb(t *testing.T) {
-    t.Parallel()
+	t.Parallel()
 
 	c := getClientInfo()
 	client, err := Authenticate(c, true)
@@ -92,7 +92,7 @@ func TestListDb(t *testing.T) {
 }
 
 func TestParkDb(t *testing.T) {
-    t.Parallel()
+	t.Parallel()
 	c := getClientInfo()
 	client, err := Authenticate(c, true)
 	if err != nil {

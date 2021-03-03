@@ -15,5 +15,5 @@
 
 # script/lint: verify no obvious bugs or layout problems are found
 
-go fmt ./... && \
+gofmt -s -w ./astraops && \
 golangci-lint run

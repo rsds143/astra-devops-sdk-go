@@ -16,6 +16,4 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-rm -fr ./bin
-mkdir ./bin
-go build -o bin/chaos .
+go build ./astraops
