@@ -1,4 +1,7 @@
+
 #!/bin/bash
+
+
 # Copyright 2021 Ryan Svihla
 #
 #   Licensed under the Apache License, Version 2.0 (the « License »);
@@ -13,7 +16,6 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-# script/lint: verify no obvious bugs or layout problems are found
-
-go fmt ./... && \
-golangci-lint run
+rm -fr ./bin
+mkdir ./bin
+go build -o bin/chaos .

@@ -50,7 +50,7 @@ func TestListDb(t *testing.T) {
 		t.Fatalf("failed authentication %v", err)
 	}
 	createDb := CreateDb{
-		Name:          "mydb",
+		Name:          "testerdb",
 		Keyspace:      "mykeyspace",
 		Region:        "europe-west1",
 		CloudProvider: "GCP",
@@ -96,7 +96,7 @@ func TestParkDb(t *testing.T) {
 		t.Fatalf("failed authentication %v", err)
 	}
 	createDb := CreateDb{
-		Name:          "mydb",
+		Name:          "testerdb",
 		Keyspace:      "mykeyspace",
 		Region:        "europe-west1",
 		CloudProvider: "GCP",

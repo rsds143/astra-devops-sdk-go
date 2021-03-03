@@ -8,19 +8,7 @@ on:
     branches:
       - main
 jobs:
-  lint:
-    runs-on: ubuntu-18.04
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-go@v2
-        with:
-          stable: 'false'
-          go-version: '1.15.8'
-      - name: Lint
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.26.0
-          ./script/lint
-  test:
+  ci:
     runs-on: ubuntu-18.04
     steps:
       - uses: actions/checkout@v2
@@ -35,5 +23,5 @@ jobs:
           SA: ${{ secrets.ASTRA_SERVICE_ACCOUNT }}
         run: |
           echo "$SA" > "$HOME/.config/astra/sa.json"
-      - name: Test
-        run: ./script/test
+      - name: ci
+        run: ./script/cibuild
