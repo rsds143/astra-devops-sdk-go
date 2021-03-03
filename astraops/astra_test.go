@@ -44,18 +44,20 @@ func getClientInfo() ClientInfo {
 }
 
 func TestListDb(t *testing.T) {
+    t.Parallel()
+
 	c := getClientInfo()
 	client, err := Authenticate(c, true)
 	if err != nil {
 		t.Fatalf("failed authentication %v", err)
 	}
 	createDb := CreateDb{
-		Name:          "testerdb",
+		Name:          "testerdblist",
 		Keyspace:      "mykeyspace",
 		Region:        "europe-west1",
 		CloudProvider: "GCP",
 		CapacityUnits: 1,
-		Tier:          "free",
+		Tier:          "serverless",
 		User:          fmt.Sprintf("a%v", rand.Int63()),
 		Password:      fmt.Sprintf("b%v", rand.Int63()),
 	}
@@ -90,13 +92,14 @@ func TestListDb(t *testing.T) {
 }
 
 func TestParkDb(t *testing.T) {
+    t.Parallel()
 	c := getClientInfo()
 	client, err := Authenticate(c, true)
 	if err != nil {
 		t.Fatalf("failed authentication %v", err)
 	}
 	createDb := CreateDb{
-		Name:          "testerdb",
+		Name:          "testerdbpark",
 		Keyspace:      "mykeyspace",
 		Region:        "europe-west1",
 		CloudProvider: "GCP",
@@ -127,5 +130,50 @@ func TestParkDb(t *testing.T) {
 	}
 	if db.Status != "PARKED" {
 		t.Fatalf("expected db to be parked but was %v", db.Status)
+	}
+}
+func TestGetConnectionBundle(t *testing.T) {
+	t.Parallel()
+	c := getClientInfo()
+	client, err := Authenticate(c, true)
+	if err != nil {
+		t.Fatalf("failed authentication %v", err)
+	}
+	createDb := CreateDb{
+		Name:          "testerdbconnect",
+		Keyspace:      "mykeyspace",
+		Region:        "europe-west1",
+		CloudProvider: "GCP",
+		CapacityUnits: 1,
+		Tier:          "serverless",
+		User:          fmt.Sprintf("a%v", rand.Int63()),
+		Password:      fmt.Sprintf("b%v", rand.Int63()),
+	}
+	id, _, err := client.CreateDb(createDb)
+	if err != nil {
+		t.Fatalf("failed creating db %v", err)
+	}
+	t.Logf("id is '%s'", id)
+	defer func() {
+		if id != "" {
+			if err := client.Terminate(id, false); err != nil {
+				t.Logf("warning error deleting created db %s up %s", createDb.Name, err)
+			}
+		}
+	}()
+	secureBundle, err := client.GetSecureBundle(id)
+	if err != nil {
+		t.Fatalf("failed getting secured bundle %v", err)
+	}
+	if secureBundle.DownloadURL == "" {
+		t.Errorf("no download url for bundle")
+	}
+
+	if secureBundle.DownloadURLInternal == "" {
+		t.Errorf("no internal download url for bundle")
+	}
+
+	if secureBundle.DownloadURLMigrationProxy == "" {
+		t.Errorf("no migration proxy url for bundle")
 	}
 }

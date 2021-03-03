@@ -184,7 +184,7 @@ func (a *AuthenticatedClient) CreateDb(createDb CreateDb) (string, DataBase, err
 		return "", DataBase{}, fmt.Errorf("expected status code 201 but had: %v error was %s", res.StatusCode, strings.Join(errorMsgs, ","))
 	}
 	id := res.Header.Get("location")
-	db, err := a.waitUntil(id, 20, 5, Active)
+	db, err := a.waitUntil(id, 20, 30, Active)
 	if err != nil {
 		return id, db, fmt.Errorf("create db failed because '%v'", err)
 	}
@@ -266,7 +266,7 @@ func (a *AuthenticatedClient) AddKeyspaceToDb(dbID, keyspaceName string) error {
 
 // GetSecureBundle finds the secure bundle connection information for the database at the specified id
 func (a *AuthenticatedClient) GetSecureBundle(id string) (SecureBundle, error) {
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/%s/secureBundleURL", serviceURL, id), http.NoBody)
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/secureBundleURL", serviceURL, id), http.NoBody)
 	if err != nil {
 		return SecureBundle{}, fmt.Errorf("failed creating request to get secure bundle for db with id %s with: %w", id, err)
 	}
@@ -279,7 +279,7 @@ func (a *AuthenticatedClient) GetSecureBundle(id string) (SecureBundle, error) {
 		var resObj map[string]interface{}
 		err = json.NewDecoder(res.Body).Decode(&resObj)
 		if err != nil {
-			return SecureBundle{}, fmt.Errorf("unable to decode error response with error: %w", err)
+			return SecureBundle{}, fmt.Errorf("unable to decode error response with error: %w, status code: %v", err, res.StatusCode)
 		}
 		return SecureBundle{}, fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj["errors"])
 	}
@@ -480,7 +480,7 @@ func (a *AuthenticatedClient) GetTierInfo() ([]TierInfo, error) {
 		var resObj map[string]interface{}
 		err = json.NewDecoder(res.Body).Decode(&resObj)
 		if err != nil {
-			return []TierInfo{}, fmt.Errorf("unable to decode error response with error: %w", err)
+			return []TierInfo{}, fmt.Errorf("unable to decode error response with error: %w, status code: %v", err, res.StatusCode)
 		}
 		return []TierInfo{}, fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj["errors"])
 	}
