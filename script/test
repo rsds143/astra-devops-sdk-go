@@ -17,4 +17,4 @@
 
 
 t="/tmp/go-cover.$$.tmp"
-go test -v -coverprofile=$t ./astraops && go tool cover -func=$t && unlink $t 
+go test -timeout 1200ms -v -coverprofile=$t ./astraops && go tool cover -func=$t && unlink $t 
