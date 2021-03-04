@@ -67,11 +67,7 @@ func TestListDb(t *testing.T) {
 	}
 	t.Logf("id is '%s'", id)
 	defer func() {
-		if id != "" {
-			if err := client.Terminate(id, false); err != nil {
-				t.Logf("warning error deleting created db %s up %s", createDb.Name, err)
-			}
-		}
+		terminateDB(t, client, id, "listdb")
 	}()
 	dbs, err := client.ListDb("", "", "", 10)
 	if err != nil {
@@ -89,6 +85,18 @@ func TestListDb(t *testing.T) {
 	if !found {
 		t.Errorf("did not find newly created db in %v", dbs)
 	}
+}
+
+func terminateDB(t *testing.T, client *AuthenticatedClient, id string, testName string) {
+	if id == "" {
+		t.Logf("no database to delete in test %v", testName)
+		return
+	}
+	if err := client.Terminate(id, false); err != nil {
+		t.Logf("warning error deleting created db %s due to %s in test %v", id, err, testName)
+		return
+	}
+	t.Logf("database %v deleted for test %v", id, testName)
 }
 
 func TestParkDb(t *testing.T) {
@@ -114,11 +122,7 @@ func TestParkDb(t *testing.T) {
 	}
 	t.Logf("id is '%s'", id)
 	defer func() {
-		if id != "" {
-			if err := client.Terminate(id, false); err != nil {
-				t.Logf("warning error deleting created db %s up %s", createDb.Name, err)
-			}
-		}
+		terminateDB(t, client, id, "parkdb")
 	}()
 	err = client.Park(id)
 	if err != nil {
@@ -132,6 +136,7 @@ func TestParkDb(t *testing.T) {
 		t.Fatalf("expected db to be parked but was %v", db.Status)
 	}
 }
+
 func TestGetConnectionBundle(t *testing.T) {
 	t.Parallel()
 	c := getClientInfo()
@@ -155,11 +160,7 @@ func TestGetConnectionBundle(t *testing.T) {
 	}
 	t.Logf("id is '%s'", id)
 	defer func() {
-		if id != "" {
-			if err := client.Terminate(id, false); err != nil {
-				t.Logf("warning error deleting created db %s up %s", createDb.Name, err)
-			}
-		}
+		terminateDB(t, client, id, "GetConnectionBundle")
 	}()
 	secureBundle, err := client.GetSecureBundle(id)
 	if err != nil {
