@@ -61,7 +61,7 @@ func TestListDb(t *testing.T) {
 		User:          fmt.Sprintf("a%v", rand.Int63()),
 		Password:      fmt.Sprintf("b%v", rand.Int63()),
 	}
-	id, _, err := client.CreateDb(createDb)
+	id, _, err := client.CreateDatabase(createDb)
 	if err != nil {
 		t.Fatalf("failed creating db %v", err)
 	}
@@ -69,7 +69,7 @@ func TestListDb(t *testing.T) {
 	defer func() {
 		terminateDB(t, client, id, "listdb")
 	}()
-	dbs, err := client.ListDb("", "", "", 10)
+	dbs, err := client.ListDatabases("", "", "", 10)
 	if err != nil {
 		t.Fatalf("failed retrieving db %v", err)
 	}
@@ -92,7 +92,7 @@ func terminateDB(t *testing.T, client *AuthenticatedClient, id string, testName 
 		t.Logf("no database to delete in test %v", testName)
 		return
 	}
-	if err := client.Terminate(id, false); err != nil {
+	if err := client.TerminateDatabase(id, false); err != nil {
 		t.Logf("warning error deleting created db %s due to %s in test %v", id, err, testName)
 		return
 	}
@@ -116,7 +116,7 @@ func TestParkDb(t *testing.T) {
 		User:          fmt.Sprintf("a%v", rand.Int63()),
 		Password:      fmt.Sprintf("b%v", rand.Int63()),
 	}
-	id, _, err := client.CreateDb(createDb)
+	id, _, err := client.CreateDatabase(createDb)
 	if err != nil {
 		t.Fatalf("failed creating db %v", err)
 	}
@@ -124,11 +124,11 @@ func TestParkDb(t *testing.T) {
 	defer func() {
 		terminateDB(t, client, id, "parkdb")
 	}()
-	err = client.Park(id)
+	err = client.ParkDatabase(id)
 	if err != nil {
 		t.Fatalf("park failed with error %v", err)
 	}
-	db, err := client.FindDb(id)
+	db, err := client.GetDatabase(id)
 	if err != nil {
 		t.Fatalf("unable to find parked db with error %v", err)
 	}
@@ -154,7 +154,7 @@ func TestGetConnectionBundle(t *testing.T) {
 		User:          fmt.Sprintf("a%v", rand.Int63()),
 		Password:      fmt.Sprintf("b%v", rand.Int63()),
 	}
-	id, _, err := client.CreateDb(createDb)
+	id, _, err := client.CreateDatabase(createDb)
 	if err != nil {
 		t.Fatalf("failed creating db %v", err)
 	}
@@ -162,7 +162,7 @@ func TestGetConnectionBundle(t *testing.T) {
 	defer func() {
 		terminateDB(t, client, id, "GetConnectionBundle")
 	}()
-	secureBundle, err := client.GetSecureBundle(id)
+	secureBundle, err := client.GenerateSecureBundleURL(id)
 	if err != nil {
 		t.Fatalf("failed getting secured bundle %v", err)
 	}
