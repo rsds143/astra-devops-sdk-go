@@ -94,8 +94,9 @@ func Authenticate(clientInfo ClientInfo, verbose bool) (*AuthenticatedClient, er
 		return &AuthenticatedClient{}, fmt.Errorf("unable to find token in json: %s", tokenResponse)
 	}
 	return &AuthenticatedClient{
-		client: c,
-		token:  fmt.Sprintf("Bearer %s", token),
+		client:  c,
+		token:   fmt.Sprintf("Bearer %s", token),
+		verbose: verbose,
 	}, nil
 }
 
@@ -340,6 +341,9 @@ func (a *AuthenticatedClient) Terminate(id string, preparedStateOnly bool) error
 				return fmt.Errorf("critical error trying to get status of database not deleted, unable to decode response with error: %v", err)
 			}
 			if db.Status == Terminated || db.Status == Terminating {
+				if a.verbose {
+					log.Printf("delete status is %v for db %v and is therefore successful, we are going to exit now", db.Status, id)
+				}
 				return nil
 			}
 			if a.verbose {
