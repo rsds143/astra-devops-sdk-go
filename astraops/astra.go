@@ -558,6 +558,36 @@ func (a *AuthenticatedClient) ListAvailableRegions() ([]AvailableRegionCombinati
 	return ti, nil
 }
 
+/*
+  SuspendDatabase suspends the database at the specified id
+  * @param databaseID string representation of the database ID
+  @return error
+*/
+func (a *AuthenticatedClient) SuspendDatabase(databaseID string) error {
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/suspend", serviceURL, databaseID), http.NoBody)
+	if err != nil {
+		return fmt.Errorf("failed creating request to suspend db with id %s with: %w", databaseID, err)
+	}
+	a.setHeaders(req)
+	res, err := a.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to suspend database id %s with: %w", databaseID, err)
+	}
+	if res.StatusCode != 202 {
+		var resObj ErrorResponse
+		err = json.NewDecoder(res.Body).Decode(&resObj)
+		if err != nil {
+			return fmt.Errorf("unable to decode error response with error: %w, status code was %v", err, res.StatusCode)
+		}
+		return fmt.Errorf("expected status code 202 but had: %v error was %v", res.StatusCode, resObj.Errors)
+	}
+	_, err = a.waitUntil(databaseID, 30, 30, PARKED)
+	if err != nil {
+		return fmt.Errorf("suspect db failed because '%v'", err)
+	}
+	return nil
+}
+
 // DatabaseInfo is some database meta data info
 type DatabaseInfo struct {
 	// Name of the database--user friendly identifier
