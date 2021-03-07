@@ -157,34 +157,43 @@ func (a *AuthenticatedClient) ListDb(include string, provider string, startingAf
 	return dbs, nil
 }
 
-// CreateDb creates a database in Astra, all fields are required and waits until it is in a created state
-func (a *AuthenticatedClient) CreateDb(createDb CreateDb) (string, DataBase, error) {
+// CreateDbAsync initiates Database Creation and then returns the ID.
+func (a *AuthenticatedClient) CreateDbAsync(createDb CreateDb) (string, error) {
 	body, err := json.Marshal(&createDb)
 	if err != nil {
-		return "", DataBase{}, fmt.Errorf("unable to marshall create db json with: %w", err)
+		return "", fmt.Errorf("unable to marshall create db json with: %w", err)
 	}
 	req, err := http.NewRequest("POST", serviceURL, bytes.NewBuffer(body))
 	if err != nil {
-		return "", DataBase{}, fmt.Errorf("failed creating request with: %w", err)
+		return "", fmt.Errorf("failed creating request with: %w", err)
 	}
 	a.setHeaders(req)
 	res, err := a.client.Do(req)
 	if err != nil {
-		return "", DataBase{}, fmt.Errorf("failed creating database with: %w", err)
+		return "", fmt.Errorf("failed creating database with: %w", err)
 	}
 	if res.StatusCode != 201 {
 		var resObj ErrorResponse
 		err = json.NewDecoder(res.Body).Decode(&resObj)
 		if err != nil {
-			return "", DataBase{}, fmt.Errorf("unable to decode error response with error: '%v'. status code was %v", err, res.StatusCode)
+			return "", fmt.Errorf("unable to decode error response with error: '%v'. status code was %v", err, res.StatusCode)
 		}
 		var errorMsgs []string
 		for _, e := range resObj.Errors {
 			errorMsgs = append(errorMsgs, fmt.Sprintf("ID: %v, Message: %v", e.ID, e.Message))
 		}
-		return "", DataBase{}, fmt.Errorf("expected status code 201 but had: %v error was %s", res.StatusCode, strings.Join(errorMsgs, ","))
+		return "", fmt.Errorf("expected status code 201 but had: %v error was %s", res.StatusCode, strings.Join(errorMsgs, ","))
 	}
-	id := res.Header.Get("location")
+	return res.Header.Get("location"), nil
+}
+
+// CreateDb creates a database in Astra, all fields are required and waits until it is in a created state
+func (a *AuthenticatedClient) CreateDb(createDb CreateDb) (string, DataBase, error) {
+	id, err := a.CreateDbAsync(createDb)
+	if err != nil {
+		return "", DataBase{}, err
+	}
+
 	db, err := a.waitUntil(id, 20, 30, Active)
 	if err != nil {
 		return id, db, fmt.Errorf("create db failed because '%v'", err)
@@ -369,8 +378,8 @@ func (a *AuthenticatedClient) Terminate(id string, preparedStateOnly bool) error
 	return fmt.Errorf("delete of db %s not complete. Last response from finding db was '%v' and last status code was %v", id, lastResponse, lastStatusCode)
 }
 
-// Park parks the database at the specified id
-func (a *AuthenticatedClient) Park(id string) error {
+// ParkAsync initiates a park of the specified database
+func (a *AuthenticatedClient) ParkAsync(id string) error {
 	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/park", serviceURL, id), http.NoBody)
 	if err != nil {
 		return fmt.Errorf("failed creating request to park db with id %s with: %w", id, err)
@@ -388,15 +397,23 @@ func (a *AuthenticatedClient) Park(id string) error {
 		}
 		return fmt.Errorf("expected status code 202 but had: %v error was %v", res.StatusCode, resObj["errors"])
 	}
-	_, err = a.waitUntil(id, 30, 30, Parked)
-	if err != nil {
+
+	return nil
+}
+
+// Park parks the database with the specified id and waits for parking to complete
+func (a *AuthenticatedClient) Park(id string) error {
+	if err := a.ParkAsync(id); err != nil {
+		return err
+	}
+	if _, err := a.waitUntil(id, 30, 30, Parked); err != nil {
 		return fmt.Errorf("park db failed because '%v'", err)
 	}
 	return nil
 }
 
-// UnPark unparks the database at the specified id
-func (a *AuthenticatedClient) UnPark(id string) error {
+// UnParkAsync initiates an unpark of the specified database
+func (a *AuthenticatedClient) UnParkAsync(id string) error {
 	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/unpark", serviceURL, id), http.NoBody)
 	if err != nil {
 		return fmt.Errorf("failed creating request to unpark db with id %s with: %w", id, err)
@@ -414,8 +431,16 @@ func (a *AuthenticatedClient) UnPark(id string) error {
 		}
 		return fmt.Errorf("expected status code 202 but had: %v error was %v", res.StatusCode, resObj["errors"])
 	}
-	_, err = a.waitUntil(id, 60, 30, Active)
-	if err != nil {
+
+	return nil
+}
+
+// UnPark unparks the database at the specified id
+func (a *AuthenticatedClient) UnPark(id string) error {
+	if err := a.UnParkAsync(id); err != nil {
+		return err
+	}
+	if _, err := a.waitUntil(id, 60, 30, Active); err != nil {
 		return fmt.Errorf("unpark db failed because '%v'", err)
 	}
 	return nil
