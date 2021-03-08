@@ -236,7 +236,7 @@ func (a *AuthenticatedClient) CreateDb(createDb CreateDb) (Database, error) {
 	if err != nil {
 		return Database{}, err
 	}
-	db, err := a.WaitUntil(id, 20, 30, ACTIVE)
+	db, err := a.WaitUntil(id, 30, 30, ACTIVE)
 	if err != nil {
 		return db, fmt.Errorf("create db failed because '%v'", err)
 	}
