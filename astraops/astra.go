@@ -55,10 +55,8 @@ const (
 	UNKNOWN      StatusEnum = "UNKNOWN"
 )
 
-// Authenticate returns a token from the service account
-func Authenticate(clientInfo ClientInfo, verbose bool) (*AuthenticatedClient, error) {
-	url := "https://api.astra.datastax.com/v2/authenticateServiceAccount"
-	c := &http.Client{
+func newHTTPClient() *http.Client {
+	return &http.Client{
 		Timeout: 5 * time.Second,
 		Transport: &http.Transport{
 			MaxIdleConns:        10,
@@ -73,6 +71,26 @@ func Authenticate(clientInfo ClientInfo, verbose bool) (*AuthenticatedClient, er
 			ExpectContinueTimeout: 1 * time.Second,
 		},
 	}
+}
+
+// AuthenticateToken returns a client
+// * @param token string - token generated for login in the astra UI
+// * @param verbose bool - if true the logging is much more verbose
+// @returns (*AuthenticatedClient , error)
+func AuthenticateToken(token string, verbose bool) *AuthenticatedClient {
+	return &AuthenticatedClient{
+		client:  newHTTPClient(),
+		token:   fmt.Sprintf("Bearer %s", token),
+		verbose: verbose,
+	}
+}
+
+// AuthenticateServiceAccount returns a client
+// * @param clientInfo - classic service account from legacy Astra
+// * @param verbose bool - if true the logging is much more verbose
+// @returns (*AuthenticatedClient , error)
+func AuthenticateServiceAccount(clientInfo ClientInfo, verbose bool) (*AuthenticatedClient, error) {
+	url := "https://api.astra.datastax.com/v2/authenticateServiceAccount"
 	body, err := json.Marshal(clientInfo)
 	if err != nil {
 		return &AuthenticatedClient{}, fmt.Errorf("unable to marshal JSON object with: %w", err)
@@ -83,7 +101,7 @@ func Authenticate(clientInfo ClientInfo, verbose bool) (*AuthenticatedClient, er
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-
+	c := newHTTPClient()
 	res, err := c.Do(req)
 	if err != nil {
 		return &AuthenticatedClient{}, fmt.Errorf("failed listing databases with: %w", err)
@@ -127,7 +145,14 @@ func (a *AuthenticatedClient) setHeaders(req *http.Request) {
 	req.Header.Set("Content-Type", "application/json")
 }
 
-func (a *AuthenticatedClient) waitUntil(id string, tries int, intervalSeconds int, status StatusEnum) (Database, error) {
+// WaitUntil will keep checking the database for the requested status until it is available. Eventually it will timeout if the operation is not
+// yet complete.
+// * @param id string - the database id to find
+// * @param tries int - number of attempts
+// * @param intervalSeconds int - seconds to wait between tries
+// * @param status StatusEnum - status to wait for
+// @returns (Database, error)
+func (a *AuthenticatedClient) WaitUntil(id string, tries int, intervalSeconds int, status StatusEnum) (Database, error) {
 	for i := 0; i < tries; i++ {
 		time.Sleep(time.Duration(intervalSeconds) * time.Second)
 		db, err := a.GetDatabase(id)
@@ -200,42 +225,55 @@ func (a *AuthenticatedClient) ListDatabases(include string, provider string, sta
 }
 
 /*
-  CreateDb creates a database in Astra, username and password fields are required only on legacy tiers and waits until it is in a created state
+  CreateDatabase creates a database in Astra, username and password fields are required only on legacy tiers and waits until it is in a created state
   * @param createDb Definition of new database
-  @return (string, Database, error)
+  @return (Database, error)
 */
-func (a *AuthenticatedClient) CreateDatabase(createDb CreateDb) (string, Database, error) {
+func (a *AuthenticatedClient) CreateDatabaseSync(createDb CreateDb) (Database, error) {
+	id, err := a.CreateDatabase(createDb)
+	if err != nil {
+		return Database{}, err
+	}
+	db, err := a.WaitUntil(id, 20, 30, ACTIVE)
+	if err != nil {
+		return db, fmt.Errorf("create db failed because '%v'", err)
+	}
+	return db, nil
+}
+
+/*
+  CreateDatabase creates a database in Astra, username and password fields are required only on legacy tiers and waits until it is in a created state
+  * @param createDb Definition of new database
+  @return (Database, error)
+*/
+func (a *AuthenticatedClient) CreateDatabase(createDb CreateDb) (string, error) {
 	body, err := json.Marshal(&createDb)
 	if err != nil {
-		return "", Database{}, fmt.Errorf("unable to marshall create db json with: %w", err)
+		return "", fmt.Errorf("unable to marshall create db json with: %w", err)
 	}
 	req, err := http.NewRequest("POST", serviceURL, bytes.NewBuffer(body))
 	if err != nil {
-		return "", Database{}, fmt.Errorf("failed creating request with: %w", err)
+		return "", fmt.Errorf("failed creating request with: %w", err)
 	}
 	a.setHeaders(req)
 	res, err := a.client.Do(req)
 	if err != nil {
-		return "", Database{}, fmt.Errorf("failed creating database with: %w", err)
+		return "", fmt.Errorf("failed creating database with: %w", err)
 	}
 	if res.StatusCode != 201 {
 		var resObj ErrorResponse
 		err = json.NewDecoder(res.Body).Decode(&resObj)
 		if err != nil {
-			return "", Database{}, fmt.Errorf("unable to decode error response with error: '%v'. status code was %v", err, res.StatusCode)
+			return "", fmt.Errorf("unable to decode error response with error: '%v'. status code was %v", err, res.StatusCode)
 		}
 		var errorMsgs []string
 		for _, e := range resObj.Errors {
 			errorMsgs = append(errorMsgs, fmt.Sprintf("ID: %v, Message: %v", e.ID, e.Message))
 		}
-		return "", Database{}, fmt.Errorf("expected status code 201 but had: %v error was %s", res.StatusCode, strings.Join(errorMsgs, ","))
+		return "", fmt.Errorf("expected status code 201 but had: %v error was %s", res.StatusCode, strings.Join(errorMsgs, ","))
 	}
 	id := res.Header.Get("location")
-	db, err := a.waitUntil(id, 20, 30, ACTIVE)
-	if err != nil {
-		return id, db, fmt.Errorf("create db failed because '%v'", err)
-	}
-	return id, db, nil
+	return id, nil
 }
 
 /*
@@ -355,6 +393,20 @@ func (a *AuthenticatedClient) TerminateDatabase(id string, preparedStateOnly boo
 		}
 		return fmt.Errorf("expected status code 202 but had: %v error was %v", res.StatusCode, resObj.Errors)
 	}
+	return nil
+}
+
+/*
+  TerminateDatabaseSync deletes the database at the specified id and will block until it shows up as deleted or is removed from the system
+  * @param databaseID string representation of the database ID
+  * @param "PreparedStateOnly" -  For internal use only.  Used to safely terminate prepared databases
+  @return error
+*/
+func (a *AuthenticatedClient) TerminateDatabaseSync(id string, preparedStateOnly bool) error {
+	err := a.TerminateDatabase(id, preparedStateOnly)
+	if err != nil {
+		return err
+	}
 	tries := 30
 	intervalSeconds := 10
 	var lastResponse string
@@ -410,7 +462,7 @@ func (a *AuthenticatedClient) TerminateDatabase(id string, preparedStateOnly boo
 }
 
 /*
-  ParkDatabase parks the database at the specified id
+  ParkDatabase parks the database at the specified id. Note you cannot park a serverless database
   * @param databaseID string representation of the database ID
   @return error
 */
@@ -432,15 +484,28 @@ func (a *AuthenticatedClient) ParkDatabase(databaseID string) error {
 		}
 		return fmt.Errorf("expected status code 202 but had: %v error was %v", res.StatusCode, resObj.Errors)
 	}
-	_, err = a.waitUntil(databaseID, 30, 30, PARKED)
+	return nil
+}
+
+/*
+  ParkDatabase parks the database at the specified id and will block until the database is parked
+  * @param databaseID string representation of the database ID
+  @return error
+*/
+func (a *AuthenticatedClient) ParkDatabaseSync(databaseID string) error {
+	err := a.ParkDatabase(databaseID)
 	if err != nil {
 		return fmt.Errorf("park db failed because '%v'", err)
+	}
+	_, err = a.WaitUntil(databaseID, 30, 30, PARKED)
+	if err != nil {
+		return fmt.Errorf("unable to check status for park db because of error '%v'", err)
 	}
 	return nil
 }
 
 /*
-  UnparkDatabase unparks the database at the specified id
+  UnparkDatabase unparks the database at the specified id. NOTE you cannot unpark a serverless database
   * @param databaseID String representation of the database ID
   @return error
 */
@@ -462,15 +527,28 @@ func (a *AuthenticatedClient) UnparkDatabase(databaseID string) error {
 		}
 		return fmt.Errorf("expected status code 202 but had: %v error was %v", res.StatusCode, resObj.Errors)
 	}
-	_, err = a.waitUntil(databaseID, 60, 30, ACTIVE)
+	return nil
+}
+
+/*
+  UnparkDatabase unparks the database at the specified id and will block until the database is unparked
+  * @param databaseID String representation of the database ID
+  @return error
+*/
+func (a *AuthenticatedClient) UnparkDatabaseSync(databaseID string) error {
+	err := a.UnparkDatabase(databaseID)
 	if err != nil {
 		return fmt.Errorf("unpark db failed because '%v'", err)
+	}
+	_, err = a.WaitUntil(databaseID, 60, 30, ACTIVE)
+	if err != nil {
+		return fmt.Errorf("unable to check status for unpark db because of error '%v'", err)
 	}
 	return nil
 }
 
 /*
-  Resizes a database. Total number of capacity units desired should be specified. Reducing a size of a database is not supported at this time.
+  Resizes a database. Total number of capacity units desired should be specified. Reducing a size of a database is not supported at this time. Note you cannot resize a serverless database
   * @param databaseID string representation of the database ID
   * @param capacityUnits int32 containing capacityUnits key with a value greater than the current number of capacity units (max increment of 3 additional capacity units)
   @return error
@@ -556,36 +634,6 @@ func (a *AuthenticatedClient) ListAvailableRegions() ([]AvailableRegionCombinati
 		return []AvailableRegionCombination{}, fmt.Errorf("unable to decode response with error: %w", err)
 	}
 	return ti, nil
-}
-
-/*
-  SuspendDatabase suspends the database at the specified id
-  * @param databaseID string representation of the database ID
-  @return error
-*/
-func (a *AuthenticatedClient) SuspendDatabase(databaseID string) error {
-	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/suspend", serviceURL, databaseID), http.NoBody)
-	if err != nil {
-		return fmt.Errorf("failed creating request to suspend db with id %s with: %w", databaseID, err)
-	}
-	a.setHeaders(req)
-	res, err := a.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to suspend database id %s with: %w", databaseID, err)
-	}
-	if res.StatusCode != 202 {
-		var resObj ErrorResponse
-		err = json.NewDecoder(res.Body).Decode(&resObj)
-		if err != nil {
-			return fmt.Errorf("unable to decode error response with error: %w, status code was %v", err, res.StatusCode)
-		}
-		return fmt.Errorf("expected status code 202 but had: %v error was %v", res.StatusCode, resObj.Errors)
-	}
-	_, err = a.waitUntil(databaseID, 30, 30, PARKED)
-	if err != nil {
-		return fmt.Errorf("suspect db failed because '%v'", err)
-	}
-	return nil
 }
 
 // DatabaseInfo is some database meta data info

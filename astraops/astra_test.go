@@ -24,50 +24,33 @@ import (
 	"os/user"
 	"path"
 	"testing"
+	"strings"
 )
 
-func getClientInfo() ClientInfo {
+func TestTokenLogin(t *testing.T) {
+	t.Parallel()
 	u, err := user.Current()
 	if err != nil {
 		log.Fatal(err)
 	}
-	saFile := path.Join(u.HomeDir, ".config", "astra", "sa.json")
-	b, err := ioutil.ReadFile(saFile)
+	tokenFile := path.Join(u.HomeDir, ".config", "astra", "token")
+	b, err := ioutil.ReadFile(tokenFile)
 	if err != nil {
 		log.Fatal(err)
 	}
-	var clientInfo ClientInfo
-	if err = json.Unmarshal(b, &clientInfo); err != nil {
-		log.Fatalf("unable to convert %s to json object with error %v", saFile, err)
+
+	client := AuthenticateToken(strings.Trim(string(b), "\n"), true)
+	_, err = client.ListDatabases("", "", "", 10)
+	if err != nil {
+		t.Fatalf("failed authentication '%v'", err)
 	}
-	return clientInfo
 }
 
 func TestListDb(t *testing.T) {
 	t.Parallel()
-
-	c := getClientInfo()
-	client, err := Authenticate(c, true)
-	if err != nil {
-		t.Fatalf("failed authentication %v", err)
-	}
-	createDb := CreateDb{
-		Name:          "testerdblist",
-		Keyspace:      "mykeyspace",
-		Region:        "europe-west1",
-		CloudProvider: "GCP",
-		CapacityUnits: 1,
-		Tier:          "serverless",
-		User:          fmt.Sprintf("a%v", rand.Int63()),
-		Password:      fmt.Sprintf("b%v", rand.Int63()),
-	}
-	id, _, err := client.CreateDatabase(createDb)
-	if err != nil {
-		t.Fatalf("failed creating db %v", err)
-	}
-	t.Logf("id is '%s'", id)
+	client, id := generateDB(t, "testerdblist", "serverless")
 	defer func() {
-		terminateDB(t, client, id, "listdb")
+		terminateDB(t, client, id)
 	}()
 	dbs, err := client.ListDatabases("", "", "", 10)
 	if err != nil {
@@ -87,44 +70,13 @@ func TestListDb(t *testing.T) {
 	}
 }
 
-func terminateDB(t *testing.T, client *AuthenticatedClient, id string, testName string) {
-	if id == "" {
-		t.Logf("no database to delete in test %v", testName)
-		return
-	}
-	if err := client.TerminateDatabase(id, false); err != nil {
-		t.Logf("warning error deleting created db %s due to %s in test %v", id, err, testName)
-		return
-	}
-	t.Logf("database %v deleted for test %v", id, testName)
-}
-
 func TestParkDb(t *testing.T) {
 	t.Parallel()
-	c := getClientInfo()
-	client, err := Authenticate(c, true)
-	if err != nil {
-		t.Fatalf("failed authentication %v", err)
-	}
-	createDb := CreateDb{
-		Name:          "testerdbpark",
-		Keyspace:      "mykeyspace",
-		Region:        "europe-west1",
-		CloudProvider: "GCP",
-		CapacityUnits: 1,
-		Tier:          "free",
-		User:          fmt.Sprintf("a%v", rand.Int63()),
-		Password:      fmt.Sprintf("b%v", rand.Int63()),
-	}
-	id, _, err := client.CreateDatabase(createDb)
-	if err != nil {
-		t.Fatalf("failed creating db %v", err)
-	}
-	t.Logf("id is '%s'", id)
+	client, id := generateDB(t, "testerdbpark", "free")
 	defer func() {
-		terminateDB(t, client, id, "parkdb")
+		terminateDB(t, client, id)
 	}()
-	err = client.ParkDatabase(id)
+	err := client.ParkDatabaseSync(id)
 	if err != nil {
 		t.Fatalf("park failed with error %v", err)
 	}
@@ -139,28 +91,9 @@ func TestParkDb(t *testing.T) {
 
 func TestGetConnectionBundle(t *testing.T) {
 	t.Parallel()
-	c := getClientInfo()
-	client, err := Authenticate(c, true)
-	if err != nil {
-		t.Fatalf("failed authentication %v", err)
-	}
-	createDb := CreateDb{
-		Name:          "testerdbconnect",
-		Keyspace:      "mykeyspace",
-		Region:        "europe-west1",
-		CloudProvider: "GCP",
-		CapacityUnits: 1,
-		Tier:          "serverless",
-		User:          fmt.Sprintf("a%v", rand.Int63()),
-		Password:      fmt.Sprintf("b%v", rand.Int63()),
-	}
-	id, _, err := client.CreateDatabase(createDb)
-	if err != nil {
-		t.Fatalf("failed creating db %v", err)
-	}
-	t.Logf("id is '%s'", id)
+	client, id := generateDB(t, "testgetconnection", "serverless")
 	defer func() {
-		terminateDB(t, client, id, "GetConnectionBundle")
+		terminateDB(t, client, id)
 	}()
 	secureBundle, err := client.GenerateSecureBundleURL(id)
 	if err != nil {
@@ -177,4 +110,86 @@ func TestGetConnectionBundle(t *testing.T) {
 	if secureBundle.DownloadURLMigrationProxy == "" {
 		t.Errorf("no migration proxy url for bundle")
 	}
+}
+
+func TestTerminateDB(t *testing.T) {
+	t.Parallel()
+	client, id := generateDB(t, "testterminate", "serverless")
+	//yes this will create a log that it cannot delete the already terminated db this is fine
+	defer func() {
+		terminateDB(t, client, id)
+	}()
+	err := client.TerminateDatabaseSync(id, false)
+	if err != nil {
+		t.Fatalf("failed to delete %v", err)
+	}
+    dbs, err := client.ListDatabases("", "", "", 10)
+	if err != nil {
+		t.Fatalf("failed retrieving db %v", err)
+	}
+	for _, db := range dbs {
+		log.Printf("id: '%v'", db.ID)
+		if db.ID == id {
+			log.Print("found newly deleted db")
+			if db.Status == TERMINATING || db.Status == TERMINATED {
+			    log.Printf("database %v successfully deleted", db.ID)
+			    break
+            }
+			t.Fatalf("expected database to terminated but it was %v", db.Status)
+		}
+	}
+}
+
+func generateDB(t *testing.T, name string, tier string) (*AuthenticatedClient, string) {
+	c := getClientInfo()
+	client, err := AuthenticateServiceAccount(c, true)
+	if err != nil {
+		t.Fatalf("failed authentication %v", err)
+	}
+	createDb := CreateDb{
+		Name:          name,
+		Keyspace:      "mykeyspace",
+		Region:        "europe-west1",
+		CloudProvider: "GCP",
+		CapacityUnits: 1,
+		Tier:          tier,
+		User:          fmt.Sprintf("a%v", rand.Int63()),
+		Password:      fmt.Sprintf("b%v", rand.Int63()),
+	}
+	db, err := client.CreateDatabaseSync(createDb)
+	if err != nil {
+		t.Fatalf("failed creating db %v", err)
+	}
+	id := db.ID
+	t.Logf("id is '%s'", id)
+	return client, id
+}
+
+func terminateDB(t *testing.T, client *AuthenticatedClient, id string) {
+	if id == "" {
+		t.Logf("no database to delete in test %v", t.Name())
+		return
+	}
+	if err := client.TerminateDatabase(id, false); err != nil {
+		t.Logf("warning error deleting created db %s due to %s in test %v", id, err, t.Name())
+		return
+	}
+	t.Logf("database %v deleted for test %v", id, t.Name())
+}
+
+func getClientInfo() ClientInfo {
+	u, err := user.Current()
+	if err != nil {
+		log.Fatal(err)
+	}
+	saFile := path.Join(u.HomeDir, ".config", "astra", "sa.json")
+	b, err := ioutil.ReadFile(saFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+	var clientInfo ClientInfo
+	if err = json.Unmarshal(b, &clientInfo); err != nil {
+		log.Fatalf("unable to convert %s to json object with error %v", saFile, err)
+	}
+	return clientInfo
 }

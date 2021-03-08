@@ -19,5 +19,4 @@
 t="/tmp/go-cover.$$.tmp"
 echo "running test $t"
 go test -timeout 1200s -v -coverprofile=$t ./astraops && go tool cover -func=$t 
-echo "deleting temp file $t"
-unlink $t || true
+unlink $t || $?
