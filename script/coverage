@@ -16,4 +16,6 @@
 # script/test: Run test suite for application. 
 
 
-go test -timeout 2200s -v ./...
+go test -timeout 1200s -coverprofile cover.out -v ./... && \
+go tool cover -html=cover.out -o cover.html && \
+open cover.html
