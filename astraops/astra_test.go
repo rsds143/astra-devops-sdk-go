@@ -72,7 +72,7 @@ func TestListDb(t *testing.T) {
 
 func TestParkDb(t *testing.T) {
 	t.Parallel()
-	client, id := generateDB(t, "testerdbpark", "free")
+	client, id := generateDB(t, "testingdbparkworks", "free")
 	defer func() {
 		terminateDB(t, client, id)
 	}()
