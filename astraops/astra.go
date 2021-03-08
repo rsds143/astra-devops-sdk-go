@@ -274,8 +274,7 @@ func (a *AuthenticatedClient) CreateDbAsync(createDb CreateDb) (string, error) {
 		}
 		return "", fmt.Errorf("expected status code 201 but had: %v error was %s", res.StatusCode, strings.Join(errorMsgs, ","))
 	}
-	id := res.Header.Get("location")
-	return id, nil
+	return res.Header.Get("location"), nil
 }
 
 /*
