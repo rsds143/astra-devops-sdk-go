@@ -23,5 +23,10 @@ jobs:
           SA: ${{ secrets.ASTRA_SERVICE_ACCOUNT }}
         run: |
           echo "$SA" > "$HOME/.config/astra/sa.json"
+      - shell: bash
+        env:
+          ASTRA_TOKEN: ${{ secrets.ASTRA_TOKEN }}
+        run: |
+          echo "$ASTRA_TOKEN" > "$HOME/.config/astra/token"
       - name: ci
         run: ./script/cibuild
