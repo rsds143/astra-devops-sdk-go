@@ -35,6 +35,7 @@ type ClientInfo struct {
 	ClientSecret string `json:"clientSecret"`
 }
 
+// StatusEnum has all the available statuses for a database
 type StatusEnum string
 
 // List of StatusEnum
@@ -85,11 +86,11 @@ func AuthenticateToken(token string, verbose bool) *AuthenticatedClient {
 	}
 }
 
-// AuthenticateServiceAccount returns a client
+//Deprecated: Authenticate returns a client
 // * @param clientInfo - classic service account from legacy Astra
 // * @param verbose bool - if true the logging is much more verbose
 // @returns (*AuthenticatedClient , error)
-func AuthenticateServiceAccount(clientInfo ClientInfo, verbose bool) (*AuthenticatedClient, error) {
+func Authenticate(clientInfo ClientInfo, verbose bool) (*AuthenticatedClient, error) {
 	url := "https://api.astra.datastax.com/v2/authenticateServiceAccount"
 	body, err := json.Marshal(clientInfo)
 	if err != nil {
@@ -155,7 +156,7 @@ func (a *AuthenticatedClient) setHeaders(req *http.Request) {
 func (a *AuthenticatedClient) WaitUntil(id string, tries int, intervalSeconds int, status StatusEnum) (Database, error) {
 	for i := 0; i < tries; i++ {
 		time.Sleep(time.Duration(intervalSeconds) * time.Second)
-		db, err := a.GetDatabase(id)
+		db, err := a.FindDb(id)
 		if err != nil {
 			if a.verbose {
 				log.Printf("db %s not able to be found with error '%v' trying again %v more times", id, err, tries-i-1)
@@ -177,14 +178,14 @@ func (a *AuthenticatedClient) WaitUntil(id string, tries int, intervalSeconds in
 }
 
 /*
-  ListDatabases find all databases that match the parameters
+  ListDb find all databases that match the parameters
   * @param "include" (optional.string) -  Allows filtering so that databases in listed states are returned
   * @param "provider" (optional.string) -  Allows filtering so that databases from a given provider are returned
   * @param "startingAfter" (optional.string) -  Optional parameter for pagination purposes. Used as this value for starting retrieving a specific page of results
   * @param "limit" (optional.int32) -  Optional parameter for pagination purposes. Specify the number of items for one page of data
   @return ([]Database, error)
 */
-func (a *AuthenticatedClient) ListDatabases(include string, provider string, startingAfter string, limit int32) ([]Database, error) {
+func (a *AuthenticatedClient) ListDb(include string, provider string, startingAfter string, limit int32) ([]Database, error) {
 	var dbs []Database
 	req, err := http.NewRequest("GET", serviceURL, http.NoBody)
 	if err != nil {
@@ -225,12 +226,13 @@ func (a *AuthenticatedClient) ListDatabases(include string, provider string, sta
 }
 
 /*
-  CreateDatabase creates a database in Astra, username and password fields are required only on legacy tiers and waits until it is in a created state
+  CreateDb creates a database in Astra, username and password fields are required only on legacy tiers and waits until it is in a created state
+  :q
   * @param createDb Definition of new database
   @return (Database, error)
 */
-func (a *AuthenticatedClient) CreateDatabaseSync(createDb CreateDb) (Database, error) {
-	id, err := a.CreateDatabase(createDb)
+func (a *AuthenticatedClient) CreateDb(createDb CreateDb) (Database, error) {
+	id, err := a.CreateDbAsync(createDb)
 	if err != nil {
 		return Database{}, err
 	}
@@ -242,11 +244,11 @@ func (a *AuthenticatedClient) CreateDatabaseSync(createDb CreateDb) (Database, e
 }
 
 /*
-  CreateDatabase creates a database in Astra, username and password fields are required only on legacy tiers and waits until it is in a created state
+  CreateDbAsync creates a database in Astra, username and password fields are required only on legacy tiers and returns immediately as soon as the request succeeds
   * @param createDb Definition of new database
   @return (Database, error)
 */
-func (a *AuthenticatedClient) CreateDatabase(createDb CreateDb) (string, error) {
+func (a *AuthenticatedClient) CreateDbAsync(createDb CreateDb) (string, error) {
 	body, err := json.Marshal(&createDb)
 	if err != nil {
 		return "", fmt.Errorf("unable to marshall create db json with: %w", err)
@@ -277,11 +279,11 @@ func (a *AuthenticatedClient) CreateDatabase(createDb CreateDb) (string, error) 
 }
 
 /*
-  GetDatabase Returns specified database
+  FindDb Returns specified database
   * @param databaseID string representation of the database ID
   @return (Database, error)
 */
-func (a *AuthenticatedClient) GetDatabase(databaseID string) (Database, error) {
+func (a *AuthenticatedClient) FindDb(databaseID string) (Database, error) {
 	var dbs Database
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/%s", serviceURL, databaseID), http.NoBody)
 	if err != nil {
@@ -308,12 +310,12 @@ func (a *AuthenticatedClient) GetDatabase(databaseID string) (Database, error) {
 }
 
 /*
-  AddKeyspace Adds keyspace into database
+  AddKeyspaceToDb Adds keyspace into database
   * @param databaseID string representation of the database ID
   * @param keyspaceName Name of database keyspace
   @return error
 */
-func (a *AuthenticatedClient) AddKeyspace(databaseID string, keyspaceName string) error {
+func (a *AuthenticatedClient) AddKeyspaceToDb(databaseID string, keyspaceName string) error {
 	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/keyspaces/%s", serviceURL, databaseID, keyspaceName), http.NoBody)
 	if err != nil {
 		return fmt.Errorf("failed creating request to add keyspace to db with id %s with: %w", databaseID, err)
@@ -335,12 +337,12 @@ func (a *AuthenticatedClient) AddKeyspace(databaseID string, keyspaceName string
 }
 
 /*
- GenerateSecureBundleURL Returns a temporary URL to download a zip file with certificates for connecting to the database.
+ GetSecureBundle Returns a temporary URL to download a zip file with certificates for connecting to the database.
  The URL expires after five minutes.&lt;p&gt;There are two types of the secure bundle URL: &lt;ul&gt
   * @param databaseID string representation of the database ID
  @return (SecureBundle, error)
 */
-func (a *AuthenticatedClient) GenerateSecureBundleURL(databaseID string) (SecureBundle, error) {
+func (a *AuthenticatedClient) GetSecureBundle(databaseID string) (SecureBundle, error) {
 	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/secureBundleURL", serviceURL, databaseID), http.NoBody)
 	if err != nil {
 		return SecureBundle{}, fmt.Errorf("failed creating request to get secure bundle for db with id %s with: %w", databaseID, err)
@@ -367,12 +369,12 @@ func (a *AuthenticatedClient) GenerateSecureBundleURL(databaseID string) (Secure
 }
 
 /*
-  TerminateDatabase deletes the database at the specified id, preparedStateOnly can be left to false in almost all cases
+  TerminateAsync deletes the database at the specified id, preparedStateOnly can be left to false in almost all cases
   * @param databaseID string representation of the database ID
   * @param "PreparedStateOnly" -  For internal use only.  Used to safely terminate prepared databases
   @return error
 */
-func (a *AuthenticatedClient) TerminateDatabase(id string, preparedStateOnly bool) error {
+func (a *AuthenticatedClient) TerminateAsync(id string, preparedStateOnly bool) error {
 	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/terminate", serviceURL, id), http.NoBody)
 	if err != nil {
 		return fmt.Errorf("failed creating request to terminate db with id %s with: %w", id, err)
@@ -397,13 +399,13 @@ func (a *AuthenticatedClient) TerminateDatabase(id string, preparedStateOnly boo
 }
 
 /*
-  TerminateDatabaseSync deletes the database at the specified id and will block until it shows up as deleted or is removed from the system
+  Terminate deletes the database at the specified id and will block until it shows up as deleted or is removed from the system
   * @param databaseID string representation of the database ID
   * @param "PreparedStateOnly" -  For internal use only.  Used to safely terminate prepared databases
   @return error
 */
-func (a *AuthenticatedClient) TerminateDatabaseSync(id string, preparedStateOnly bool) error {
-	err := a.TerminateDatabase(id, preparedStateOnly)
+func (a *AuthenticatedClient) Terminate(id string, preparedStateOnly bool) error {
+	err := a.TerminateAsync(id, preparedStateOnly)
 	if err != nil {
 		return err
 	}
@@ -462,11 +464,11 @@ func (a *AuthenticatedClient) TerminateDatabaseSync(id string, preparedStateOnly
 }
 
 /*
-  ParkDatabase parks the database at the specified id. Note you cannot park a serverless database
+  ParkAsync parks the database at the specified id. Note you cannot park a serverless database
   * @param databaseID string representation of the database ID
   @return error
 */
-func (a *AuthenticatedClient) ParkDatabase(databaseID string) error {
+func (a *AuthenticatedClient) ParkAsync(databaseID string) error {
 	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/park", serviceURL, databaseID), http.NoBody)
 	if err != nil {
 		return fmt.Errorf("failed creating request to park db with id %s with: %w", databaseID, err)
@@ -492,8 +494,8 @@ func (a *AuthenticatedClient) ParkDatabase(databaseID string) error {
   * @param databaseID string representation of the database ID
   @return error
 */
-func (a *AuthenticatedClient) ParkDatabaseSync(databaseID string) error {
-	err := a.ParkDatabase(databaseID)
+func (a *AuthenticatedClient) Park(databaseID string) error {
+	err := a.ParkAsync(databaseID)
 	if err != nil {
 		return fmt.Errorf("park db failed because '%v'", err)
 	}
@@ -505,11 +507,11 @@ func (a *AuthenticatedClient) ParkDatabaseSync(databaseID string) error {
 }
 
 /*
-  UnparkDatabase unparks the database at the specified id. NOTE you cannot unpark a serverless database
+  UnparkAsync unparks the database at the specified id. NOTE you cannot unpark a serverless database
   * @param databaseID String representation of the database ID
   @return error
 */
-func (a *AuthenticatedClient) UnparkDatabase(databaseID string) error {
+func (a *AuthenticatedClient) UnparkAsync(databaseID string) error {
 	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/unpark", serviceURL, databaseID), http.NoBody)
 	if err != nil {
 		return fmt.Errorf("failed creating request to unpark db with id %s with: %w", databaseID, err)
@@ -531,12 +533,12 @@ func (a *AuthenticatedClient) UnparkDatabase(databaseID string) error {
 }
 
 /*
-  UnparkDatabase unparks the database at the specified id and will block until the database is unparked
+  Unpark unparks the database at the specified id and will block until the database is unparked
   * @param databaseID String representation of the database ID
   @return error
 */
-func (a *AuthenticatedClient) UnparkDatabaseSync(databaseID string) error {
-	err := a.UnparkDatabase(databaseID)
+func (a *AuthenticatedClient) Unpark(databaseID string) error {
+	err := a.UnparkAsync(databaseID)
 	if err != nil {
 		return fmt.Errorf("unpark db failed because '%v'", err)
 	}
@@ -605,33 +607,32 @@ func (a *AuthenticatedClient) ResetPassword(databaseID, username, password strin
 }
 
 /*
-  ListAvailableRegions Returns all supported tier, cloud, region, count, and capacitity combinations
-  * @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
-  @return ([]AvailableRegionCombination, error)
+  GetTierInfo Returns all supported tier, cloud, region, count, and capacitity combinations
+  @return ([]TierInfo, error)
 */
-func (a *AuthenticatedClient) ListAvailableRegions() ([]AvailableRegionCombination, error) {
-	var ti []AvailableRegionCombination
+func (a *AuthenticatedClient) GetTierInfo() ([]TierInfo, error) {
+	var ti []TierInfo
 	req, err := http.NewRequest("GET", "https://api.astra.datastax.com/v2/availableRegions", http.NoBody)
 	if err != nil {
-		return []AvailableRegionCombination{}, fmt.Errorf("failed creating request for tier info with: %w", err)
+		return []TierInfo{}, fmt.Errorf("failed creating request for tier info with: %w", err)
 	}
 	a.setHeaders(req)
 
 	res, err := a.client.Do(req)
 	if err != nil {
-		return []AvailableRegionCombination{}, fmt.Errorf("failed listing tier info with: %w", err)
+		return []TierInfo{}, fmt.Errorf("failed listing tier info with: %w", err)
 	}
 	if res.StatusCode != 200 {
 		var resObj ErrorResponse
 		err = json.NewDecoder(res.Body).Decode(&resObj)
 		if err != nil {
-			return []AvailableRegionCombination{}, fmt.Errorf("unable to decode error response with error: %w, status code: %v", err, res.StatusCode)
+			return []TierInfo{}, fmt.Errorf("unable to decode error response with error: %w, status code: %v", err, res.StatusCode)
 		}
-		return []AvailableRegionCombination{}, fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj.Errors)
+		return []TierInfo{}, fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj.Errors)
 	}
 	err = json.NewDecoder(res.Body).Decode(&ti)
 	if err != nil {
-		return []AvailableRegionCombination{}, fmt.Errorf("unable to decode response with error: %w", err)
+		return []TierInfo{}, fmt.Errorf("unable to decode response with error: %w", err)
 	}
 	return ti, nil
 }
@@ -687,8 +688,8 @@ type RegionCombination struct {
 	Cost          *Costs `json:"cost"`
 }
 
-// AvailableRegionCombination defines a Tier, cloud provider, region combination
-type AvailableRegionCombination struct {
+// TierInfo defines a Tier, cloud provider, region combination
+type TierInfo struct {
 	Tier                            string `json:"tier"`
 	CloudProvider                   string `json:"cloudProvider"`
 	Region                          string `json:"region"`

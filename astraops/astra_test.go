@@ -23,8 +23,8 @@ import (
 	"math/rand"
 	"os/user"
 	"path"
-	"testing"
 	"strings"
+	"testing"
 )
 
 func TestTokenLogin(t *testing.T) {
@@ -40,7 +40,7 @@ func TestTokenLogin(t *testing.T) {
 	}
 
 	client := AuthenticateToken(strings.Trim(string(b), "\n"), true)
-	_, err = client.ListDatabases("", "", "", 10)
+	_, err = client.ListDb("", "", "", 10)
 	if err != nil {
 		t.Fatalf("failed authentication '%v'", err)
 	}
@@ -52,7 +52,7 @@ func TestListDb(t *testing.T) {
 	defer func() {
 		terminateDB(t, client, id)
 	}()
-	dbs, err := client.ListDatabases("", "", "", 10)
+	dbs, err := client.ListDb("", "", "", 10)
 	if err != nil {
 		t.Fatalf("failed retrieving db %v", err)
 	}
@@ -76,11 +76,11 @@ func TestParkDb(t *testing.T) {
 	defer func() {
 		terminateDB(t, client, id)
 	}()
-	err := client.ParkDatabaseSync(id)
+	err := client.Park(id)
 	if err != nil {
 		t.Fatalf("park failed with error %v", err)
 	}
-	db, err := client.GetDatabase(id)
+	db, err := client.FindDb(id)
 	if err != nil {
 		t.Fatalf("unable to find parked db with error %v", err)
 	}
@@ -95,7 +95,7 @@ func TestGetConnectionBundle(t *testing.T) {
 	defer func() {
 		terminateDB(t, client, id)
 	}()
-	secureBundle, err := client.GenerateSecureBundleURL(id)
+	secureBundle, err := client.GetSecureBundle(id)
 	if err != nil {
 		t.Fatalf("failed getting secured bundle %v", err)
 	}
@@ -119,11 +119,11 @@ func TestTerminateDB(t *testing.T) {
 	defer func() {
 		terminateDB(t, client, id)
 	}()
-	err := client.TerminateDatabaseSync(id, false)
+	err := client.Terminate(id, false)
 	if err != nil {
 		t.Fatalf("failed to delete %v", err)
 	}
-    dbs, err := client.ListDatabases("", "", "", 10)
+	dbs, err := client.ListDb("", "", "", 10)
 	if err != nil {
 		t.Fatalf("failed retrieving db %v", err)
 	}
@@ -132,9 +132,9 @@ func TestTerminateDB(t *testing.T) {
 		if db.ID == id {
 			log.Print("found newly deleted db")
 			if db.Status == TERMINATING || db.Status == TERMINATED {
-			    log.Printf("database %v successfully deleted", db.ID)
-			    break
-            }
+				log.Printf("database %v successfully deleted", db.ID)
+				break
+			}
 			t.Fatalf("expected database to terminated but it was %v", db.Status)
 		}
 	}
@@ -142,7 +142,7 @@ func TestTerminateDB(t *testing.T) {
 
 func generateDB(t *testing.T, name string, tier string) (*AuthenticatedClient, string) {
 	c := getClientInfo()
-	client, err := AuthenticateServiceAccount(c, true)
+	client, err := Authenticate(c, true)
 	if err != nil {
 		t.Fatalf("failed authentication %v", err)
 	}
@@ -156,7 +156,7 @@ func generateDB(t *testing.T, name string, tier string) (*AuthenticatedClient, s
 		User:          fmt.Sprintf("a%v", rand.Int63()),
 		Password:      fmt.Sprintf("b%v", rand.Int63()),
 	}
-	db, err := client.CreateDatabaseSync(createDb)
+	db, err := client.CreateDb(createDb)
 	if err != nil {
 		t.Fatalf("failed creating db %v", err)
 	}
@@ -170,7 +170,7 @@ func terminateDB(t *testing.T, client *AuthenticatedClient, id string) {
 		t.Logf("no database to delete in test %v", t.Name())
 		return
 	}
-	if err := client.TerminateDatabase(id, false); err != nil {
+	if err := client.TerminateAsync(id, false); err != nil {
 		t.Logf("warning error deleting created db %s due to %s in test %v", id, err, t.Name())
 		return
 	}
