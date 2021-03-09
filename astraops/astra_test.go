@@ -27,6 +27,32 @@ import (
 	"testing"
 )
 
+func TestSALogin(t *testing.T) {
+	t.Parallel()
+	u, err := user.Current()
+	if err != nil {
+		log.Fatal(err)
+	}
+	saFile := path.Join(u.HomeDir, ".config", "astra", "sa.json")
+	b, err := ioutil.ReadFile(saFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+	var clientInfo ClientInfo
+	if err = json.Unmarshal(b, &clientInfo); err != nil {
+		t.Fatalf("unable to convert %s to json object with error %v", saFile, err)
+	}
+
+	client, err := Authenticate(clientInfo, true)
+	if err != nil {
+		t.Fatalf("failed authentication '%v'", err)
+	}
+	_, err = client.ListDb("", "", "", 10)
+	if err != nil {
+		t.Fatalf("failed authentication '%v'", err)
+	}
+}
+
 func TestTokenLogin(t *testing.T) {
 	t.Parallel()
 	u, err := user.Current()
@@ -141,11 +167,8 @@ func TestTerminateDB(t *testing.T) {
 }
 
 func generateDB(t *testing.T, name string, tier string) (*AuthenticatedClient, string) {
-	c := getClientInfo()
-	client, err := Authenticate(c, true)
-	if err != nil {
-		t.Fatalf("failed authentication %v", err)
-	}
+	c := getToken()
+	client := AuthenticateToken(c, true)
 	createDb := CreateDb{
 		Name:          name,
 		Keyspace:      "mykeyspace",
@@ -177,19 +200,15 @@ func terminateDB(t *testing.T, client *AuthenticatedClient, id string) {
 	t.Logf("database %v deleted for test %v", id, t.Name())
 }
 
-func getClientInfo() ClientInfo {
+func getToken() string {
 	u, err := user.Current()
 	if err != nil {
 		log.Fatal(err)
 	}
-	saFile := path.Join(u.HomeDir, ".config", "astra", "sa.json")
-	b, err := ioutil.ReadFile(saFile)
+	token := path.Join(u.HomeDir, ".config", "astra", "token")
+	b, err := ioutil.ReadFile(token)
 	if err != nil {
 		log.Fatal(err)
 	}
-	var clientInfo ClientInfo
-	if err = json.Unmarshal(b, &clientInfo); err != nil {
-		log.Fatalf("unable to convert %s to json object with error %v", saFile, err)
-	}
-	return clientInfo
+	return strings.Trim(string(b), "\n")
 }

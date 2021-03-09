@@ -24,6 +24,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"strconv"
 	"strings"
 	"time"
@@ -104,6 +105,7 @@ func Authenticate(clientInfo ClientInfo, verbose bool) (*AuthenticatedClient, er
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	c := newHTTPClient()
+	logReq(req, verbose)
 	res, err := c.Do(req)
 	if err != nil {
 		return &AuthenticatedClient{}, fmt.Errorf("failed listing databases with: %w", err)
@@ -205,6 +207,7 @@ func (a *AuthenticatedClient) ListDb(include string, provider string, startingAf
 		q.Add("limit", strconv.FormatInt(int64(limit), 10))
 	}
 	req.URL.RawQuery = q.Encode()
+	logReq(req, a.verbose)
 	res, err := a.client.Do(req)
 	if err != nil {
 		return dbs, fmt.Errorf("failed listing databases with: %v", err)
@@ -252,6 +255,7 @@ func (a *AuthenticatedClient) CreateDbAsync(createDb CreateDb) (string, error) {
 		return "", fmt.Errorf("failed creating request with: %w", err)
 	}
 	a.setHeaders(req)
+	logReq(req, a.verbose)
 	res, err := a.client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed creating database with: %w", err)
@@ -281,6 +285,7 @@ func (a *AuthenticatedClient) FindDb(databaseID string) (Database, error) {
 		return dbs, fmt.Errorf("failed creating request to find db with id %s with: %w", databaseID, err)
 	}
 	a.setHeaders(req)
+	logReq(req, a.verbose)
 	res, err := a.client.Do(req)
 	if err != nil {
 		return dbs, fmt.Errorf("failed get database id %s with: %w", databaseID, err)
@@ -310,6 +315,7 @@ func (a *AuthenticatedClient) AddKeyspaceToDb(databaseID string, keyspaceName st
 		return fmt.Errorf("failed creating request to add keyspace to db with id %s with: %w", databaseID, err)
 	}
 	a.setHeaders(req)
+	logReq(req, a.verbose)
 	res, err := a.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to add keyspace to db id %s with: %w", databaseID, err)
@@ -335,6 +341,7 @@ func (a *AuthenticatedClient) GetSecureBundle(databaseID string) (SecureBundle, 
 		return SecureBundle{}, fmt.Errorf("failed creating request to get secure bundle for db with id %s with: %w", databaseID, err)
 	}
 	a.setHeaders(req)
+	logReq(req, a.verbose)
 	res, err := a.client.Do(req)
 	if err != nil {
 		return SecureBundle{}, fmt.Errorf("failed get secure bundle for database id %s with: %w", databaseID, err)
@@ -368,6 +375,7 @@ func (a *AuthenticatedClient) TerminateAsync(id string, preparedStateOnly bool) 
 	q := req.URL.Query()
 	q.Add("preparedStateOnly", strconv.FormatBool(preparedStateOnly))
 	req.URL.RawQuery = q.Encode()
+	logReq(req, a.verbose)
 	res, err := a.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to terminate database id %s with: %w", id, err)
@@ -403,6 +411,7 @@ func (a *AuthenticatedClient) Terminate(id string, preparedStateOnly bool) error
 			return fmt.Errorf("failed creating request to find db with id %s with: %w", id, err)
 		}
 		a.setHeaders(req)
+	    logReq(req, a.verbose)
 		res, err := a.client.Do(req)
 		if err != nil {
 			return fmt.Errorf("failed get database id %s with: %w", id, err)
@@ -455,6 +464,7 @@ func (a *AuthenticatedClient) ParkAsync(databaseID string) error {
 		return fmt.Errorf("failed creating request to park db with id %s with: %w", databaseID, err)
 	}
 	a.setHeaders(req)
+	logReq(req, a.verbose)
 	res, err := a.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to park database id %s with: %w", databaseID, err)
@@ -494,6 +504,7 @@ func (a *AuthenticatedClient) UnparkAsync(databaseID string) error {
 		return fmt.Errorf("failed creating request to unpark db with id %s with: %w", databaseID, err)
 	}
 	a.setHeaders(req)
+	logReq(req, a.verbose)
 	res, err := a.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to unpark database id %s with: %w", databaseID, err)
@@ -535,6 +546,7 @@ func (a *AuthenticatedClient) Resize(databaseID string, capacityUnits int32) err
 		return fmt.Errorf("failed creating request to unpark db with id %s with: %w", databaseID, err)
 	}
 	a.setHeaders(req)
+	logReq(req, a.verbose)
 	res, err := a.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to unpark database id %s with: %w", databaseID, err)
@@ -562,6 +574,7 @@ func (a *AuthenticatedClient) ResetPassword(databaseID, username, password strin
 		return fmt.Errorf("failed creating request to reset password for db with id %s with: %w", databaseID, err)
 	}
 	a.setHeaders(req)
+	logReq(req, a.verbose)
 	res, err := a.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to reset password for database id %s with: %w", databaseID, err)
@@ -586,7 +599,7 @@ func (a *AuthenticatedClient) GetTierInfo() ([]TierInfo, error) {
 		return []TierInfo{}, fmt.Errorf("failed creating request for tier info with: %w", err)
 	}
 	a.setHeaders(req)
-
+	logReq(req, a.verbose)
 	res, err := a.client.Do(req)
 	if err != nil {
 		return []TierInfo{}, fmt.Errorf("failed listing tier info with: %w", err)
@@ -604,6 +617,16 @@ func (a *AuthenticatedClient) GetTierInfo() ([]TierInfo, error) {
 		return []TierInfo{}, fmt.Errorf("unable to decode response with error: %w", err)
 	}
 	return ti, nil
+}
+
+func logReq(req *http.Request, verbose bool) {
+    if verbose {
+	    dump, err := httputil.DumpRequestOut(req, true)
+	    if err != nil {
+	        log.Printf("error dumping http request %v", err)
+	    }
+	    fmt.Printf("%s\n", dump)
+    }
 }
 
 //DatabaseInfo is some database meta data info
