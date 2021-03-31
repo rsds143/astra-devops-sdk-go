@@ -30,3 +30,13 @@ jobs:
           echo "$ASTRA_TOKEN" > "$HOME/.config/astra/token"
       - name: ci
         run: ./script/cibuild
+      - name: Install goveralls
+        env:
+          GO111MODULE: off
+        run: go get github.com/mattn/goveralls
+      - name: Send coverage
+        env:
+          COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: goveralls -coverprofile=covprofile -service=github
+        
+    
