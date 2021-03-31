@@ -20,6 +20,7 @@ package astraops
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -108,26 +109,20 @@ func Authenticate(clientInfo ClientInfo, verbose bool) (*AuthenticatedClient, er
 	if err != nil {
 		return &AuthenticatedClient{}, fmt.Errorf("failed listing databases with: %w", err)
 	}
-	var tokenResponse map[string]interface{}
 	if res.StatusCode != 200 {
-		err = json.NewDecoder(res.Body).Decode(&tokenResponse)
-		if err != nil {
-			return &AuthenticatedClient{}, fmt.Errorf("unable to decode error response with error: %w", err)
-		}
-		return &AuthenticatedClient{}, fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, tokenResponse["errors"])
+		return &AuthenticatedClient{}, readErrorFromResponse(res, 200)
 	}
+	var tokenResponse TokenResponse
 	err = json.NewDecoder(res.Body).Decode(&tokenResponse)
 	if err != nil {
 		return &AuthenticatedClient{}, fmt.Errorf("unable to decode response with error: %w", err)
 	}
-	var token interface{}
-	var ok bool
-	if token, ok = tokenResponse["token"]; !ok {
-		return &AuthenticatedClient{}, fmt.Errorf("unable to find token in json: %s", tokenResponse)
+	if tokenResponse.Token == "" {
+		return &AuthenticatedClient{}, errors.New("emtpy token in token response")
 	}
 	return &AuthenticatedClient{
 		client:  c,
-		token:   fmt.Sprintf("Bearer %s", token),
+		token:   fmt.Sprintf("Bearer %s", tokenResponse.Token),
 		verbose: verbose,
 	}, nil
 }
@@ -210,12 +205,7 @@ func (a *AuthenticatedClient) ListDb(include string, provider string, startingAf
 		return dbs, fmt.Errorf("failed listing databases with: %v", err)
 	}
 	if res.StatusCode != 200 {
-		var resObj ErrorResponse
-		err = json.NewDecoder(res.Body).Decode(&resObj)
-		if err != nil {
-			return []Database{}, fmt.Errorf("unable to decode error response with error: %v for status code %v", err, res.StatusCode)
-		}
-		return []Database{}, fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj.Errors)
+		return dbs, readErrorFromResponse(res, 200)
 	}
 	err = json.NewDecoder(res.Body).Decode(&dbs)
 	if err != nil {
@@ -257,18 +247,26 @@ func (a *AuthenticatedClient) CreateDbAsync(createDb CreateDb) (string, error) {
 		return "", fmt.Errorf("failed creating database with: %w", err)
 	}
 	if res.StatusCode != 201 {
-		var resObj ErrorResponse
-		err = json.NewDecoder(res.Body).Decode(&resObj)
-		if err != nil {
-			return "", fmt.Errorf("unable to decode error response with error: '%v'. status code was %v", err, res.StatusCode)
-		}
-		var errorMsgs []string
-		for _, e := range resObj.Errors {
-			errorMsgs = append(errorMsgs, fmt.Sprintf("ID: %v, Message: %v", e.ID, e.Message))
-		}
-		return "", fmt.Errorf("expected status code 201 but had: %v error was %s", res.StatusCode, strings.Join(errorMsgs, ","))
+		return "", readErrorFromResponse(res, 201)
 	}
 	return res.Header.Get("location"), nil
+}
+
+func readErrorFromResponse(res *http.Response, expectedCodes ...int) error {
+	var resObj ErrorResponse
+	err := json.NewDecoder(res.Body).Decode(&resObj)
+	if err != nil {
+		return fmt.Errorf("unable to decode error response with error: '%v'. status code was %v", err, res.StatusCode)
+	}
+	var statusSuffix string
+	if len(expectedCodes) > 0 {
+		statusSuffix = "s"
+	}
+	var errorSuffix string
+	if len(resObj.Errors) > 0 {
+		errorSuffix = "s"
+	}
+	return fmt.Errorf("expected status code%v but had: %v error with error%v - %v", statusSuffix, res.StatusCode, errorSuffix, FormatErrors(resObj.Errors))
 }
 
 //FindDb Returns specified database
@@ -286,12 +284,7 @@ func (a *AuthenticatedClient) FindDb(databaseID string) (Database, error) {
 		return dbs, fmt.Errorf("failed get database id %s with: %w", databaseID, err)
 	}
 	if res.StatusCode != 200 {
-		var resObj ErrorResponse
-		err = json.NewDecoder(res.Body).Decode(&resObj)
-		if err != nil {
-			return Database{}, fmt.Errorf("unable to decode error response with error: %w", err)
-		}
-		return Database{}, fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj.Errors)
+		return dbs, readErrorFromResponse(res, 200)
 	}
 	err = json.NewDecoder(res.Body).Decode(&dbs)
 	if err != nil {
@@ -315,12 +308,7 @@ func (a *AuthenticatedClient) AddKeyspaceToDb(databaseID string, keyspaceName st
 		return fmt.Errorf("failed to add keyspace to db id %s with: %w", databaseID, err)
 	}
 	if res.StatusCode != 200 {
-		var resObj ErrorResponse
-		err = json.NewDecoder(res.Body).Decode(&resObj)
-		if err != nil {
-			return fmt.Errorf("unable to decode error response with error: %w", err)
-		}
-		return fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj.Errors)
+		return readErrorFromResponse(res, 200)
 	}
 	return nil
 }
@@ -340,12 +328,7 @@ func (a *AuthenticatedClient) GetSecureBundle(databaseID string) (SecureBundle, 
 		return SecureBundle{}, fmt.Errorf("failed get secure bundle for database id %s with: %w", databaseID, err)
 	}
 	if res.StatusCode != 200 {
-		var resObj ErrorResponse
-		err = json.NewDecoder(res.Body).Decode(&resObj)
-		if err != nil {
-			return SecureBundle{}, fmt.Errorf("unable to decode error response with error: %w, status code: %v", err, res.StatusCode)
-		}
-		return SecureBundle{}, fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj.Errors)
+		return SecureBundle{}, readErrorFromResponse(res, 200)
 	}
 	var sb SecureBundle
 	err = json.NewDecoder(res.Body).Decode(&sb)
@@ -373,12 +356,7 @@ func (a *AuthenticatedClient) TerminateAsync(id string, preparedStateOnly bool) 
 		return fmt.Errorf("failed to terminate database id %s with: %w", id, err)
 	}
 	if res.StatusCode != 202 {
-		var resObj ErrorResponse
-		err = json.NewDecoder(res.Body).Decode(&resObj)
-		if err != nil {
-			return fmt.Errorf("unable to decode error response with error: %w, status code was %v", err, res.StatusCode)
-		}
-		return fmt.Errorf("expected status code 202 but had: %v error was %v", res.StatusCode, resObj.Errors)
+		return readErrorFromResponse(res, 202)
 	}
 	return nil
 }
@@ -430,13 +408,7 @@ func (a *AuthenticatedClient) Terminate(id string, preparedStateOnly bool) error
 			}
 			continue
 		}
-		var resObj ErrorResponse
-		err = json.NewDecoder(res.Body).Decode(&resObj)
-		if err != nil {
-			return fmt.Errorf("unable to decode error response with error: %w status code was %v", err, res.StatusCode)
-		}
-		lastResponse = fmt.Sprintf("%v", resObj.Errors)
-
+		lastResponse = fmt.Sprintf("%v", readErrorFromResponse(res, 200, 401))
 		if a.verbose {
 			log.Printf("db %s not deleted yet expected status code 401 or a 200 with a db Status of %v or %v but was: %v and error was '%v'. trying again", id, TERMINATED, TERMINATING, res.StatusCode, lastResponse)
 		} else {
@@ -460,12 +432,7 @@ func (a *AuthenticatedClient) ParkAsync(databaseID string) error {
 		return fmt.Errorf("failed to park database id %s with: %w", databaseID, err)
 	}
 	if res.StatusCode != 202 {
-		var resObj ErrorResponse
-		err = json.NewDecoder(res.Body).Decode(&resObj)
-		if err != nil {
-			return fmt.Errorf("unable to decode error response with error: %w, status code was %v", err, res.StatusCode)
-		}
-		return fmt.Errorf("expected status code 202 but had: %v error was %v", res.StatusCode, resObj.Errors)
+		return readErrorFromResponse(res, 202)
 	}
 	return nil
 }
@@ -499,12 +466,7 @@ func (a *AuthenticatedClient) UnparkAsync(databaseID string) error {
 		return fmt.Errorf("failed to unpark database id %s with: %w", databaseID, err)
 	}
 	if res.StatusCode != 202 {
-		var resObj ErrorResponse
-		err = json.NewDecoder(res.Body).Decode(&resObj)
-		if err != nil {
-			return fmt.Errorf("unable to decode error response with error: %w, status code was %v", err, res.StatusCode)
-		}
-		return fmt.Errorf("expected status code 202 but had: %v error was %v", res.StatusCode, resObj.Errors)
+		return readErrorFromResponse(res, 202)
 	}
 	return nil
 }
@@ -545,7 +507,7 @@ func (a *AuthenticatedClient) Resize(databaseID string, capacityUnits int32) err
 		if err != nil {
 			return fmt.Errorf("unable to decode error response with error: %w", err)
 		}
-		return fmt.Errorf("expected status code 2xx but had: %v error was %v", res.StatusCode, resObj.Errors)
+		return fmt.Errorf("expected status code 2xx but had: %v with error(s) - %v", res.StatusCode, FormatErrors(resObj.Errors))
 	}
 	return nil
 }
@@ -567,12 +529,7 @@ func (a *AuthenticatedClient) ResetPassword(databaseID, username, password strin
 		return fmt.Errorf("failed to reset password for database id %s with: %w", databaseID, err)
 	}
 	if res.StatusCode != 200 {
-		var resObj ErrorResponse
-		err = json.NewDecoder(res.Body).Decode(&resObj)
-		if err != nil {
-			return fmt.Errorf("unable to decode error response with error: %w", err)
-		}
-		return fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj.Errors)
+		return readErrorFromResponse(res, 200)
 	}
 	return nil
 }
@@ -592,12 +549,7 @@ func (a *AuthenticatedClient) GetTierInfo() ([]TierInfo, error) {
 		return []TierInfo{}, fmt.Errorf("failed listing tier info with: %w", err)
 	}
 	if res.StatusCode != 200 {
-		var resObj ErrorResponse
-		err = json.NewDecoder(res.Body).Decode(&resObj)
-		if err != nil {
-			return []TierInfo{}, fmt.Errorf("unable to decode error response with error: %w, status code: %v", err, res.StatusCode)
-		}
-		return []TierInfo{}, fmt.Errorf("expected status code 200 but had: %v error was %v", res.StatusCode, resObj.Errors)
+		return []TierInfo{}, readErrorFromResponse(res, 200)
 	}
 	err = json.NewDecoder(res.Body).Decode(&ti)
 	if err != nil {
@@ -736,6 +688,12 @@ type CreateDb struct {
 	Password string `json:"password"`
 }
 
+//TokenResponse comes from the classic service account auth
+type TokenResponse struct {
+	Token  string  `json:"token"`
+	Errors []Error `json:"errors"`
+}
+
 //ErrorResponse when the API has an error
 type ErrorResponse struct {
 	Errors []Error `json:"errors"`
@@ -759,4 +717,13 @@ type Storage struct {
 	TotalStorage int32 `json:"totalStorage"`
 	// UsedStorage in GB
 	UsedStorage int32 `json:"usedStorage,omitempty"`
+}
+
+//FormatErrors puts the API errors into a well formatted text output
+func FormatErrors(es []Error) string {
+	var formatted []string
+	for _, e := range es {
+		formatted = append(formatted, fmt.Sprintf("ID: %v Text: '%v'", e.ID, e.Message))
+	}
+	return strings.Join(formatted, ", ")
 }

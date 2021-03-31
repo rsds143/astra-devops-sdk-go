@@ -193,3 +193,14 @@ func getClientInfo() ClientInfo {
 	}
 	return clientInfo
 }
+
+func TestFormatErrors(t *testing.T) {
+	str := FormatErrors([]Error{
+		{ID: 1, Message: "hello error"},
+		{ID: 2, Message: "goodbye error"},
+	})
+	expected := "ID: 1 Text: 'hello error', ID: 2 Text: 'goodbye error'"
+	if str != expected {
+		t.Errorf("expected '%v' but was '%v'", expected, str)
+	}
+}
