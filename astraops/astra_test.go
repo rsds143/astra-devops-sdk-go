@@ -232,7 +232,7 @@ func TestReadErrorFromResponse(t *testing.T) {
 		]
 	}
 	`)
-	body := io.NopCloser(stringReader)
+	body := ioutil.NopCloser(stringReader)
 	err := readErrorFromResponse(&http.Response{
 		StatusCode: 400,
 		Body:       body,
