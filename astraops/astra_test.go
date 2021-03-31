@@ -19,7 +19,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -245,7 +244,7 @@ func TestReadErrorFromResponse(t *testing.T) {
 
 func TestReadErrorFromResponseBadJSON(t *testing.T) {
 	stringReader := strings.NewReader(`wrongerror`)
-	body := io.NopCloser(stringReader)
+	body := ioutil.NopCloser(stringReader)
 	err := readErrorFromResponse(&http.Response{
 		StatusCode: 400,
 		Body:       body,
