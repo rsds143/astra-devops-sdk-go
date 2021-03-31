@@ -15,4 +15,4 @@
 
 # script/test: Run test suite for application. 
 
-go test -race -covermode atomic -coverprofile=covprofile ./... && go tool cover -func=covprofile
+go test -timeout 2200s -covermode atomic -coverprofile=covprofile ./... && go tool cover -func=covprofile
