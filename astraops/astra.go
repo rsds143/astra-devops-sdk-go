@@ -118,7 +118,7 @@ func Authenticate(clientInfo ClientInfo, verbose bool) (*AuthenticatedClient, er
 		return &AuthenticatedClient{}, fmt.Errorf("unable to decode response with error: %w", err)
 	}
 	if tokenResponse.Token == "" {
-		return &AuthenticatedClient{}, errors.New("emtpy token in token response")
+		return &AuthenticatedClient{}, errors.New("empty token in token response")
 	}
 	return &AuthenticatedClient{
 		client:  c,
