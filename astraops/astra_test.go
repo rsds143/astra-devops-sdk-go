@@ -156,10 +156,6 @@ func generateDB(t *testing.T, name string, tier string) (*AuthenticatedClient, s
 	if err != nil {
 		t.Fatalf("failed authentication %v", err)
 	}
-	user, err := generateString()
-	if err != nil {
-		t.Fatalf("failed random gen %v", err)
-	}
 	pass, err := generateString()
 	if err != nil {
 		t.Fatalf("failed random gen %v", err)
@@ -171,7 +167,7 @@ func generateDB(t *testing.T, name string, tier string) (*AuthenticatedClient, s
 		CloudProvider: "GCP",
 		CapacityUnits: 1,
 		Tier:          tier,
-		User:          user,
+		User:          "myuser",
 		Password:      pass,
 	}
 	db, err := client.CreateDb(createDb)
