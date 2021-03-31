@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-//Package astraops provides access to the Astra DevOps api
+// Package astraops provides access to the Astra DevOps api
 package astraops
 
 import (
@@ -25,22 +25,23 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 )
 
-//ClientInfo is a handy type for consumers but not used internally in the library other than for testing
+// ClientInfo is a handy type for consumers but not used internally in the library other than for testing
 type ClientInfo struct {
 	ClientName   string `json:"clientName"`
 	ClientID     string `json:"clientId"`
 	ClientSecret string `json:"clientSecret"`
 }
 
-//StatusEnum has all the available statuses for a database
+// StatusEnum has all the available statuses for a database
 type StatusEnum string
 
-//List of StatusEnum
+// List of StatusEnum
 const (
 	ACTIVE       StatusEnum = "ACTIVE"
 	PENDING      StatusEnum = "PENDING"
@@ -76,7 +77,7 @@ func newHTTPClient() *http.Client {
 	}
 }
 
-//AuthenticateToken returns a client
+// AuthenticateToken returns a client
 // * @param token string - token generated for login in the astra UI
 // * @param verbose bool - if true the logging is much more verbose
 // @returns (*AuthenticatedClient , error)
@@ -88,7 +89,7 @@ func AuthenticateToken(token string, verbose bool) *AuthenticatedClient {
 	}
 }
 
-//Authenticate returns a client using legacy Service Account. This is not deprecated but one should move to AuthenticateToken
+// Authenticate returns a client using legacy Service Account. This is not deprecated but one should move to AuthenticateToken
 // * @param clientInfo - classic service account from legacy Astra
 // * @param verbose bool - if true the logging is much more verbose
 // @returns (*AuthenticatedClient , error)
@@ -109,6 +110,7 @@ func Authenticate(clientInfo ClientInfo, verbose bool) (*AuthenticatedClient, er
 	if err != nil {
 		return &AuthenticatedClient{}, fmt.Errorf("failed listing databases with: %w", err)
 	}
+	defer closeBody(res)
 	if res.StatusCode != 200 {
 		return &AuthenticatedClient{}, readErrorFromResponse(res, 200)
 	}
@@ -127,7 +129,7 @@ func Authenticate(clientInfo ClientInfo, verbose bool) (*AuthenticatedClient, er
 	}, nil
 }
 
-//AuthenticatedClient has a token and the methods to query the Astra DevOps API
+// AuthenticatedClient has a token and the methods to query the Astra DevOps API
 type AuthenticatedClient struct {
 	token   string
 	client  *http.Client
@@ -142,7 +144,7 @@ func (a *AuthenticatedClient) setHeaders(req *http.Request) {
 	req.Header.Set("Content-Type", "application/json")
 }
 
-//WaitUntil will keep checking the database for the requested status until it is available. Eventually it will timeout if the operation is not
+// WaitUntil will keep checking the database for the requested status until it is available. Eventually it will timeout if the operation is not
 // yet complete.
 // * @param id string - the database id to find
 // * @param tries int - number of attempts
@@ -173,12 +175,12 @@ func (a *AuthenticatedClient) WaitUntil(id string, tries int, intervalSeconds in
 	return Database{}, fmt.Errorf("unable to find db id %s with status %s after %v seconds", id, status, intervalSeconds*tries)
 }
 
-//ListDb find all databases that match the parameters
+// ListDb find all databases that match the parameters
 // * @param "include" (optional.string) -  Allows filtering so that databases in listed states are returned
 // * @param "provider" (optional.string) -  Allows filtering so that databases from a given provider are returned
 // * @param "startingAfter" (optional.string) -  Optional parameter for pagination purposes. Used as this value for starting retrieving a specific page of results
 // * @param "limit" (optional.int32) -  Optional parameter for pagination purposes. Specify the number of items for one page of data
-//@return ([]Database, error)
+// @return ([]Database, error)
 func (a *AuthenticatedClient) ListDb(include string, provider string, startingAfter string, limit int32) ([]Database, error) {
 	var dbs []Database
 	req, err := http.NewRequest("GET", serviceURL, http.NoBody)
@@ -204,6 +206,7 @@ func (a *AuthenticatedClient) ListDb(include string, provider string, startingAf
 	if err != nil {
 		return dbs, fmt.Errorf("failed listing databases with: %v", err)
 	}
+	defer closeBody(res)
 	if res.StatusCode != 200 {
 		return dbs, readErrorFromResponse(res, 200)
 	}
@@ -214,9 +217,9 @@ func (a *AuthenticatedClient) ListDb(include string, provider string, startingAf
 	return dbs, nil
 }
 
-//CreateDb creates a database in Astra, username and password fields are required only on legacy tiers and waits until it is in a created state
+// CreateDb creates a database in Astra, username and password fields are required only on legacy tiers and waits until it is in a created state
 // * @param createDb Definition of new database
-//@return (Database, error)
+// @return (Database, error)
 func (a *AuthenticatedClient) CreateDb(createDb CreateDb) (Database, error) {
 	id, err := a.CreateDbAsync(createDb)
 	if err != nil {
@@ -229,9 +232,9 @@ func (a *AuthenticatedClient) CreateDb(createDb CreateDb) (Database, error) {
 	return db, nil
 }
 
-//CreateDbAsync creates a database in Astra, username and password fields are required only on legacy tiers and returns immediately as soon as the request succeeds
+// CreateDbAsync creates a database in Astra, username and password fields are required only on legacy tiers and returns immediately as soon as the request succeeds
 // * @param createDb Definition of new database
-//@return (Database, error)
+// @return (Database, error)
 func (a *AuthenticatedClient) CreateDbAsync(createDb CreateDb) (string, error) {
 	body, err := json.Marshal(&createDb)
 	if err != nil {
@@ -246,6 +249,7 @@ func (a *AuthenticatedClient) CreateDbAsync(createDb CreateDb) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed creating database with: %w", err)
 	}
+	defer closeBody(res)
 	if res.StatusCode != 201 {
 		return "", readErrorFromResponse(res, 201)
 	}
@@ -266,12 +270,17 @@ func readErrorFromResponse(res *http.Response, expectedCodes ...int) error {
 	if len(resObj.Errors) > 0 {
 		errorSuffix = "s"
 	}
-	return fmt.Errorf("expected status code%v but had: %v error with error%v - %v", statusSuffix, res.StatusCode, errorSuffix, FormatErrors(resObj.Errors))
+	var codeString []string
+	for _, c := range expectedCodes {
+		codeString = append(codeString, fmt.Sprintf("%v", c))
+	}
+	formattedCodes := strings.Join(codeString, ", ")
+	return fmt.Errorf("expected status code%v %v but had: %v error with error%v - %v", statusSuffix, formattedCodes, res.StatusCode, errorSuffix, FormatErrors(resObj.Errors))
 }
 
-//FindDb Returns specified database
+// FindDb Returns specified database
 // * @param databaseID string representation of the database ID
-//@return (Database, error)
+// @return (Database, error)
 func (a *AuthenticatedClient) FindDb(databaseID string) (Database, error) {
 	var dbs Database
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/%s", serviceURL, databaseID), http.NoBody)
@@ -283,6 +292,7 @@ func (a *AuthenticatedClient) FindDb(databaseID string) (Database, error) {
 	if err != nil {
 		return dbs, fmt.Errorf("failed get database id %s with: %w", databaseID, err)
 	}
+	defer closeBody(res)
 	if res.StatusCode != 200 {
 		return dbs, readErrorFromResponse(res, 200)
 	}
@@ -293,10 +303,10 @@ func (a *AuthenticatedClient) FindDb(databaseID string) (Database, error) {
 	return dbs, nil
 }
 
-//AddKeyspaceToDb Adds keyspace into database
+// AddKeyspaceToDb Adds keyspace into database
 // * @param databaseID string representation of the database ID
 // * @param keyspaceName Name of database keyspace
-//@return error
+// @return error
 func (a *AuthenticatedClient) AddKeyspaceToDb(databaseID string, keyspaceName string) error {
 	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/keyspaces/%s", serviceURL, databaseID, keyspaceName), http.NoBody)
 	if err != nil {
@@ -307,16 +317,17 @@ func (a *AuthenticatedClient) AddKeyspaceToDb(databaseID string, keyspaceName st
 	if err != nil {
 		return fmt.Errorf("failed to add keyspace to db id %s with: %w", databaseID, err)
 	}
+	defer closeBody(res)
 	if res.StatusCode != 200 {
 		return readErrorFromResponse(res, 200)
 	}
 	return nil
 }
 
-//GetSecureBundle Returns a temporary URL to download a zip file with certificates for connecting to the database.
-//The URL expires after five minutes.&lt;p&gt;There are two types of the secure bundle URL: &lt;ul&gt
+// GetSecureBundle Returns a temporary URL to download a zip file with certificates for connecting to the database.
+// The URL expires after five minutes.&lt;p&gt;There are two types of the secure bundle URL: &lt;ul&gt
 // * @param databaseID string representation of the database ID
-//@return (SecureBundle, error)
+// @return (SecureBundle, error)
 func (a *AuthenticatedClient) GetSecureBundle(databaseID string) (SecureBundle, error) {
 	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/secureBundleURL", serviceURL, databaseID), http.NoBody)
 	if err != nil {
@@ -327,6 +338,7 @@ func (a *AuthenticatedClient) GetSecureBundle(databaseID string) (SecureBundle, 
 	if err != nil {
 		return SecureBundle{}, fmt.Errorf("failed get secure bundle for database id %s with: %w", databaseID, err)
 	}
+	defer closeBody(res)
 	if res.StatusCode != 200 {
 		return SecureBundle{}, readErrorFromResponse(res, 200)
 	}
@@ -338,10 +350,10 @@ func (a *AuthenticatedClient) GetSecureBundle(databaseID string) (SecureBundle, 
 	return sb, nil
 }
 
-//TerminateAsync deletes the database at the specified id, preparedStateOnly can be left to false in almost all cases
+// TerminateAsync deletes the database at the specified id, preparedStateOnly can be left to false in almost all cases
 // * @param databaseID string representation of the database ID
 // * @param "PreparedStateOnly" -  For internal use only.  Used to safely terminate prepared databases
-//@return error
+// @return error
 func (a *AuthenticatedClient) TerminateAsync(id string, preparedStateOnly bool) error {
 	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/terminate", serviceURL, id), http.NoBody)
 	if err != nil {
@@ -355,16 +367,17 @@ func (a *AuthenticatedClient) TerminateAsync(id string, preparedStateOnly bool) 
 	if err != nil {
 		return fmt.Errorf("failed to terminate database id %s with: %w", id, err)
 	}
+	defer closeBody(res)
 	if res.StatusCode != 202 {
 		return readErrorFromResponse(res, 202)
 	}
 	return nil
 }
 
-//Terminate deletes the database at the specified id and will block until it shows up as deleted or is removed from the system
+// Terminate deletes the database at the specified id and will block until it shows up as deleted or is removed from the system
 // * @param databaseID string representation of the database ID
 // * @param "PreparedStateOnly" -  For internal use only.  Used to safely terminate prepared databases
-//@return error
+// @return error
 func (a *AuthenticatedClient) Terminate(id string, preparedStateOnly bool) error {
 	err := a.TerminateAsync(id, preparedStateOnly)
 	if err != nil {
@@ -385,6 +398,7 @@ func (a *AuthenticatedClient) Terminate(id string, preparedStateOnly bool) error
 		if err != nil {
 			return fmt.Errorf("failed get database id %s with: %w", id, err)
 		}
+		defer closeBody(res)
 		lastStatusCode = res.StatusCode
 		if res.StatusCode == 401 {
 			return nil
@@ -418,9 +432,9 @@ func (a *AuthenticatedClient) Terminate(id string, preparedStateOnly bool) error
 	return fmt.Errorf("delete of db %s not complete. Last response from finding db was '%v' and last status code was %v", id, lastResponse, lastStatusCode)
 }
 
-//ParkAsync parks the database at the specified id. Note you cannot park a serverless database
+// ParkAsync parks the database at the specified id. Note you cannot park a serverless database
 // * @param databaseID string representation of the database ID
-//@return error
+// @return error
 func (a *AuthenticatedClient) ParkAsync(databaseID string) error {
 	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/park", serviceURL, databaseID), http.NoBody)
 	if err != nil {
@@ -431,15 +445,16 @@ func (a *AuthenticatedClient) ParkAsync(databaseID string) error {
 	if err != nil {
 		return fmt.Errorf("failed to park database id %s with: %w", databaseID, err)
 	}
+	defer closeBody(res)
 	if res.StatusCode != 202 {
 		return readErrorFromResponse(res, 202)
 	}
 	return nil
 }
 
-//Park parks the database at the specified id and will block until the database is parked
+// Park parks the database at the specified id and will block until the database is parked
 // * @param databaseID string representation of the database ID
-//@return error
+// @return error
 func (a *AuthenticatedClient) Park(databaseID string) error {
 	err := a.ParkAsync(databaseID)
 	if err != nil {
@@ -452,9 +467,9 @@ func (a *AuthenticatedClient) Park(databaseID string) error {
 	return nil
 }
 
-//UnparkAsync unparks the database at the specified id. NOTE you cannot unpark a serverless database
-//* @param databaseID String representation of the database ID
-//@return error
+// UnparkAsync unparks the database at the specified id. NOTE you cannot unpark a serverless database
+// * @param databaseID String representation of the database ID
+// @return error
 func (a *AuthenticatedClient) UnparkAsync(databaseID string) error {
 	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/unpark", serviceURL, databaseID), http.NoBody)
 	if err != nil {
@@ -465,15 +480,16 @@ func (a *AuthenticatedClient) UnparkAsync(databaseID string) error {
 	if err != nil {
 		return fmt.Errorf("failed to unpark database id %s with: %w", databaseID, err)
 	}
+	defer closeBody(res)
 	if res.StatusCode != 202 {
 		return readErrorFromResponse(res, 202)
 	}
 	return nil
 }
 
-//Unpark unparks the database at the specified id and will block until the database is unparked
-//* @param databaseID String representation of the database ID
-//@return error
+// Unpark unparks the database at the specified id and will block until the database is unparked
+// * @param databaseID String representation of the database ID
+// @return error
 func (a *AuthenticatedClient) Unpark(databaseID string) error {
 	err := a.UnparkAsync(databaseID)
 	if err != nil {
@@ -486,10 +502,10 @@ func (a *AuthenticatedClient) Unpark(databaseID string) error {
 	return nil
 }
 
-//Resize a database. Total number of capacity units desired should be specified. Reducing a size of a database is not supported at this time. Note you cannot resize a serverless database
-//* @param databaseID string representation of the database ID
-//* @param capacityUnits int32 containing capacityUnits key with a value greater than the current number of capacity units (max increment of 3 additional capacity units)
-//@return error
+// Resize a database. Total number of capacity units desired should be specified. Reducing a size of a database is not supported at this time. Note you cannot resize a serverless database
+// * @param databaseID string representation of the database ID
+// * @param capacityUnits int32 containing capacityUnits key with a value greater than the current number of capacity units (max increment of 3 additional capacity units)
+// @return error
 func (a *AuthenticatedClient) Resize(databaseID string, capacityUnits int32) error {
 	body := fmt.Sprintf("{\"capacityUnits\":%d}", capacityUnits)
 	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/resize", serviceURL, databaseID), bytes.NewBufferString(body))
@@ -501,6 +517,7 @@ func (a *AuthenticatedClient) Resize(databaseID string, capacityUnits int32) err
 	if err != nil {
 		return fmt.Errorf("failed to unpark database id %s with: %w", databaseID, err)
 	}
+	defer res.Body.Close()
 	if res.StatusCode > 299 {
 		var resObj ErrorResponse
 		err = json.NewDecoder(res.Body).Decode(&resObj)
@@ -512,11 +529,11 @@ func (a *AuthenticatedClient) Resize(databaseID string, capacityUnits int32) err
 	return nil
 }
 
-//ResetPassword changes the password for the database at the specified id
-//* @param databaseID string representation of the database ID
-//* @param username string containing username
-//* @param password string containing password. The specified password will be updated for the specified database user
-//@return error
+// ResetPassword changes the password for the database at the specified id
+// * @param databaseID string representation of the database ID
+// * @param username string containing username
+// * @param password string containing password. The specified password will be updated for the specified database user
+// @return error
 func (a *AuthenticatedClient) ResetPassword(databaseID, username, password string) error {
 	body := fmt.Sprintf("{\"username\":\"%s\",\"password\":\"%s\"}", username, password)
 	req, err := http.NewRequest("POST", fmt.Sprintf("%s/%s/resetPassword", serviceURL, databaseID), bytes.NewBufferString(body))
@@ -528,14 +545,15 @@ func (a *AuthenticatedClient) ResetPassword(databaseID, username, password strin
 	if err != nil {
 		return fmt.Errorf("failed to reset password for database id %s with: %w", databaseID, err)
 	}
+	defer closeBody(res)
 	if res.StatusCode != 200 {
 		return readErrorFromResponse(res, 200)
 	}
 	return nil
 }
 
-//GetTierInfo Returns all supported tier, cloud, region, count, and capacitity combinations
-//@return ([]TierInfo, error)
+// GetTierInfo Returns all supported tier, cloud, region, count, and capacitity combinations
+// @return ([]TierInfo, error)
 func (a *AuthenticatedClient) GetTierInfo() ([]TierInfo, error) {
 	var ti []TierInfo
 	req, err := http.NewRequest("GET", "https://api.astra.datastax.com/v2/availableRegions", http.NoBody)
@@ -548,6 +566,7 @@ func (a *AuthenticatedClient) GetTierInfo() ([]TierInfo, error) {
 	if err != nil {
 		return []TierInfo{}, fmt.Errorf("failed listing tier info with: %w", err)
 	}
+	defer closeBody(res)
 	if res.StatusCode != 200 {
 		return []TierInfo{}, readErrorFromResponse(res, 200)
 	}
@@ -558,7 +577,7 @@ func (a *AuthenticatedClient) GetTierInfo() ([]TierInfo, error) {
 	return ti, nil
 }
 
-//DatabaseInfo is some database meta data info
+// DatabaseInfo is some database meta data info
 type DatabaseInfo struct {
 	// Name of the database--user friendly identifier
 	Name string `json:"name,omitempty"`
@@ -580,7 +599,7 @@ type DatabaseInfo struct {
 	AdditionalKeyspaces []string `json:"additionalKeyspaces,omitempty"`
 }
 
-//MigrationProxyConfiguration of the migration proxy and mappings of astra node to a customer node currently in use
+// MigrationProxyConfiguration of the migration proxy and mappings of astra node to a customer node currently in use
 type MigrationProxyConfiguration struct {
 	// origin cassandra username
 	OriginUsername string `json:"originUsername"`
@@ -589,7 +608,7 @@ type MigrationProxyConfiguration struct {
 	Mappings       []MigrationProxyMapping `json:"mappings"`
 }
 
-//MigrationProxyMapping is a mapping of astra node to a customer node currently in use
+// MigrationProxyMapping is a mapping of astra node to a customer node currently in use
 type MigrationProxyMapping struct {
 	// ip on which the node currently in use is accessible
 	OriginIP string `json:"originIP"`
@@ -601,7 +620,7 @@ type MigrationProxyMapping struct {
 	RackNodeOrdinal int32 `json:"rackNodeOrdinal"`
 }
 
-//RegionCombination defines a Tier, cloud provider, region combination
+// RegionCombination defines a Tier, cloud provider, region combination
 type RegionCombination struct {
 	Tier          string `json:"tier"`
 	CloudProvider string `json:"cloudProvider"`
@@ -609,7 +628,7 @@ type RegionCombination struct {
 	Cost          *Costs `json:"cost"`
 }
 
-//TierInfo defines a Tier, cloud provider, region combination
+// TierInfo defines a Tier, cloud provider, region combination
 type TierInfo struct {
 	Tier                            string `json:"tier"`
 	CloudProvider                   string `json:"cloudProvider"`
@@ -622,7 +641,7 @@ type TierInfo struct {
 	DefaultStoragePerCapacityUnitGb int32  `json:"defaultStoragePerCapacityUnitGb"`
 }
 
-//Costs are the total costs skus for the given tier
+// Costs are the total costs skus for the given tier
 type Costs struct {
 	CostPerMinCents         float64 `json:"costPerMinCents,omitempty"`
 	CostPerHourCents        float64 `json:"costPerHourCents,omitempty"`
@@ -634,7 +653,7 @@ type Costs struct {
 	CostPerMonthParkedCents float64 `json:"costPerMonthParkedCents,omitempty"`
 }
 
-//Database is the returned data from the Astra DevOps API
+// Database is the returned data from the Astra DevOps API
 type Database struct {
 	ID      string       `json:"id"`
 	OrgID   string       `json:"orgId"`
@@ -656,7 +675,7 @@ type Database struct {
 	DataEndpointURL string `json:"dataEndpointUrl,omitempty"`
 }
 
-//SecureBundle from which the creds zip may be downloaded
+// SecureBundle from which the creds zip may be downloaded
 type SecureBundle struct {
 	// DownloadURL is only valid for about 5 minutes
 	DownloadURL string `json:"downloadURL"`
@@ -668,7 +687,7 @@ type SecureBundle struct {
 	DownloadURLMigrationProxyInternal string `json:"downloadURLMigrationProxyInternal,omitempty"`
 }
 
-//CreateDb object for submitting a new database
+// CreateDb object for submitting a new database
 type CreateDb struct {
 	// Name of the database--user friendly identifier
 	Name string `json:"name"`
@@ -688,18 +707,18 @@ type CreateDb struct {
 	Password string `json:"password"`
 }
 
-//TokenResponse comes from the classic service account auth
+// TokenResponse comes from the classic service account auth
 type TokenResponse struct {
 	Token  string  `json:"token"`
 	Errors []Error `json:"errors"`
 }
 
-//ErrorResponse when the API has an error
+// ErrorResponse when the API has an error
 type ErrorResponse struct {
 	Errors []Error `json:"errors"`
 }
 
-//Error when the api has an error this is the structure
+// Error when the api has an error this is the structure
 type Error struct {
 	// API specific error code
 	ID int32 `json:"ID,omitempty"`
@@ -707,7 +726,7 @@ type Error struct {
 	Message string `json:"message"`
 }
 
-//Storage contains the information about how much storage space a cluster has available
+// Storage contains the information about how much storage space a cluster has available
 type Storage struct {
 	// NodeCount for the cluster
 	NodeCount int32 `json:"nodeCount"`
@@ -719,11 +738,17 @@ type Storage struct {
 	UsedStorage int32 `json:"usedStorage,omitempty"`
 }
 
-//FormatErrors puts the API errors into a well formatted text output
+// FormatErrors puts the API errors into a well formatted text output
 func FormatErrors(es []Error) string {
 	var formatted []string
 	for _, e := range es {
 		formatted = append(formatted, fmt.Sprintf("ID: %v Text: '%v'", e.ID, e.Message))
 	}
 	return strings.Join(formatted, ", ")
+}
+
+func closeBody(res *http.Response) {
+	if err := res.Body.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "unable to close request body '%v'", err)
+	}
 }

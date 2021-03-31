@@ -16,11 +16,13 @@
 package astraops
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
-	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
-	"math/rand"
+	"net/http"
 	"os/user"
 	"path"
 	"strings"
@@ -115,7 +117,7 @@ func TestGetConnectionBundle(t *testing.T) {
 func TestTerminateDB(t *testing.T) {
 	t.Parallel()
 	client, id := generateDB(t, "testterminate", "serverless")
-	//yes this will create a log that it cannot delete the already terminated db this is fine
+	// yes this will create a log that it cannot delete the already terminated db this is fine
 	defer func() {
 		terminateDB(t, client, id)
 	}()
@@ -140,11 +142,28 @@ func TestTerminateDB(t *testing.T) {
 	}
 }
 
+func generateString() (string, error) {
+	b := make([]byte, 20)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
 func generateDB(t *testing.T, name string, tier string) (*AuthenticatedClient, string) {
 	c := getClientInfo()
 	client, err := Authenticate(c, true)
 	if err != nil {
 		t.Fatalf("failed authentication %v", err)
+	}
+	user, err := generateString()
+	if err != nil {
+		t.Fatalf("failed random gen %v", err)
+	}
+	pass, err := generateString()
+	if err != nil {
+		t.Fatalf("failed random gen %v", err)
 	}
 	createDb := CreateDb{
 		Name:          name,
@@ -153,8 +172,8 @@ func generateDB(t *testing.T, name string, tier string) (*AuthenticatedClient, s
 		CloudProvider: "GCP",
 		CapacityUnits: 1,
 		Tier:          tier,
-		User:          fmt.Sprintf("a%v", rand.Int63()),
-		Password:      fmt.Sprintf("b%v", rand.Int63()),
+		User:          user,
+		Password:      pass,
 	}
 	db, err := client.CreateDb(createDb)
 	if err != nil {
@@ -202,5 +221,37 @@ func TestFormatErrors(t *testing.T) {
 	expected := "ID: 1 Text: 'hello error', ID: 2 Text: 'goodbye error'"
 	if str != expected {
 		t.Errorf("expected '%v' but was '%v'", expected, str)
+	}
+}
+
+func TestReadErrorFromResponse(t *testing.T) {
+	stringReader := strings.NewReader(`
+		{ "errors": [
+			{"id":1, "message": "bad error"},
+			{"id":2, "message": "worse error"}
+		]
+	}
+	`)
+	body := io.NopCloser(stringReader)
+	err := readErrorFromResponse(&http.Response{
+		StatusCode: 400,
+		Body:       body,
+	}, 201, 202)
+	expected := "expected status codes 201, 202 but had: 400 error with errors - ID: 1 Text: 'bad error', ID: 2 Text: 'worse error'"
+	if err.Error() != expected {
+		t.Errorf("expected '%v' but was '%v'", expected, err.Error())
+	}
+}
+
+func TestReadErrorFromResponseBadJSON(t *testing.T) {
+	stringReader := strings.NewReader(`wrongerror`)
+	body := io.NopCloser(stringReader)
+	err := readErrorFromResponse(&http.Response{
+		StatusCode: 400,
+		Body:       body,
+	}, 201, 202)
+	expected := "unable to decode error response with error: 'invalid character 'w' looking for beginning of value'. status code was 400"
+	if err.Error() != expected {
+		t.Errorf("expected '%v' but was '%v'", expected, err.Error())
 	}
 }
