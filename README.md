@@ -1,3 +1,5 @@
+DEPRECATED use https://github.com/datastax/astra-client-go instead
+
 # astra-devops-sdk-go
 
 [![.github/workflows/go.yaml](https://github.com/rsds143/astra-devops-sdk-go/actions/workflows/go.yaml/badge.svg)](https://github.com/rsds143/astra-devops-sdk-go/actions/workflows/go.yaml)
