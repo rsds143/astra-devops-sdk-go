@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -37,6 +38,16 @@ type ClientInfo struct {
 	ClientID     string `json:"clientId"`
 	ClientSecret string `json:"clientSecret"`
 }
+
+// TracingLevel helps diagnose problems with http requests
+type TracingLevel string
+
+// List of TracingLevels
+const (
+	TracePrivate TracingLevel = "PRIVATE"
+	TraceAll     TracingLevel = "ALL"
+	TraceNone    TracingLevel = "NONE"
+)
 
 // StatusEnum has all the available statuses for a database
 type StatusEnum string
@@ -77,15 +88,77 @@ func newHTTPClient() *http.Client {
 	}
 }
 
+// LoggedRequest provides structure to response
+type LoggedRequest struct {
+	URL     string              `json:"url"`
+	Body    string              `json:"body"`
+	Headers map[string][]string `json:"headers"`
+}
+
+// LoggedResponse provides structure to response
+type LoggedResponse struct {
+	Status     string              `json:"status"`
+	StatusCode int                 `json:"statusCode"`
+	Body       string              `json:"body"`
+	Headers    map[string][]string `json:"headers"`
+}
+
+func logRequest(req *http.Request, trace TracingLevel) {
+	var loggedRequest LoggedRequest
+	loggedRequest.Headers = make(map[string][]string)
+	token := "redacted"
+	if trace != TracePrivate {
+		token = req.Header.Get("Authorization")
+	}
+	loggedRequest.Headers["Authorization"] = []string{token}
+	for name, values := range req.Header {
+		if name != "Authorization" {
+			loggedRequest.Headers[name] = values
+		}
+	}
+	loggedRequest.URL = fmt.Sprintf("%v", req.URL)
+	bytes, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		log.Printf("HTTP TRACE REQUEST ERROR - unable to write request body with error '%v'", err)
+	}
+	if len(bytes) > 0 && err == nil {
+		loggedRequest.Body = string(bytes)
+	}
+	log.Printf("HTTP TRACE REQUEST - %v", loggedRequest)
+}
+
+func logResponse(res *http.Response) {
+	var loggedResponse LoggedResponse
+	loggedResponse.Headers = res.Header
+	bytes, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		log.Printf("HTTP TRACE RESPONSE ERROR - unable to write response body with error '%v'", err)
+	}
+	if len(bytes) > 0 && err == nil {
+		loggedResponse.Body = string(bytes)
+	}
+	loggedResponse.Status = res.Status
+	loggedResponse.StatusCode = res.StatusCode
+	log.Printf("HTTP TRACE REQUEST - %v", loggedResponse)
+}
+
+func maybeTrace(req *http.Request, res *http.Response, trace TracingLevel) {
+	if trace != TraceNone {
+		logRequest(req, trace)
+		logResponse(res)
+	}
+}
+
 // AuthenticateToken returns a client
 // * @param token string - token generated for login in the astra UI
 // * @param verbose bool - if true the logging is much more verbose
 // @returns (*AuthenticatedClient , error)
-func AuthenticateToken(token string, verbose bool) *AuthenticatedClient {
+func AuthenticateToken(token string, verbose bool, trace TracingLevel) *AuthenticatedClient {
 	return &AuthenticatedClient{
 		client:  newHTTPClient(),
 		token:   fmt.Sprintf("Bearer %s", token),
 		verbose: verbose,
+		trace:   trace,
 	}
 }
 
@@ -93,7 +166,7 @@ func AuthenticateToken(token string, verbose bool) *AuthenticatedClient {
 // * @param clientInfo - classic service account from legacy Astra
 // * @param verbose bool - if true the logging is much more verbose
 // @returns (*AuthenticatedClient , error)
-func Authenticate(clientInfo ClientInfo, verbose bool) (*AuthenticatedClient, error) {
+func Authenticate(clientInfo ClientInfo, verbose bool, trace TracingLevel) (*AuthenticatedClient, error) {
 	url := "https://api.astra.datastax.com/v2/authenticateServiceAccount"
 	body, err := json.Marshal(clientInfo)
 	if err != nil {
@@ -110,6 +183,7 @@ func Authenticate(clientInfo ClientInfo, verbose bool) (*AuthenticatedClient, er
 	if err != nil {
 		return &AuthenticatedClient{}, fmt.Errorf("failed listing databases with: %w", err)
 	}
+	maybeTrace(req, res, trace)
 	defer closeBody(res)
 	if res.StatusCode != 200 {
 		return &AuthenticatedClient{}, readErrorFromResponse(res, 200)
@@ -126,6 +200,7 @@ func Authenticate(clientInfo ClientInfo, verbose bool) (*AuthenticatedClient, er
 		client:  c,
 		token:   fmt.Sprintf("Bearer %s", tokenResponse.Token),
 		verbose: verbose,
+		trace:   trace,
 	}, nil
 }
 
@@ -134,6 +209,7 @@ type AuthenticatedClient struct {
 	token   string
 	client  *http.Client
 	verbose bool
+	trace   TracingLevel
 }
 
 const serviceURL = "https://api.astra.datastax.com/v2/databases"
@@ -203,6 +279,7 @@ func (a *AuthenticatedClient) ListDb(include string, provider string, startingAf
 	}
 	req.URL.RawQuery = q.Encode()
 	res, err := a.client.Do(req)
+	maybeTrace(req, res, a.trace)
 	if err != nil {
 		return dbs, fmt.Errorf("failed listing databases with: %v", err)
 	}
@@ -246,6 +323,7 @@ func (a *AuthenticatedClient) CreateDbAsync(createDb CreateDb) (string, error) {
 	}
 	a.setHeaders(req)
 	res, err := a.client.Do(req)
+	maybeTrace(req, res, a.trace)
 	if err != nil {
 		return "", fmt.Errorf("failed creating database with: %w", err)
 	}
@@ -289,6 +367,7 @@ func (a *AuthenticatedClient) FindDb(databaseID string) (Database, error) {
 	}
 	a.setHeaders(req)
 	res, err := a.client.Do(req)
+	maybeTrace(req, res, a.trace)
 	if err != nil {
 		return dbs, fmt.Errorf("failed get database id %s with: %w", databaseID, err)
 	}
@@ -314,6 +393,7 @@ func (a *AuthenticatedClient) AddKeyspaceToDb(databaseID string, keyspaceName st
 	}
 	a.setHeaders(req)
 	res, err := a.client.Do(req)
+	maybeTrace(req, res, a.trace)
 	if err != nil {
 		return fmt.Errorf("failed to add keyspace to db id %s with: %w", databaseID, err)
 	}
@@ -335,6 +415,7 @@ func (a *AuthenticatedClient) GetSecureBundle(databaseID string) (SecureBundle, 
 	}
 	a.setHeaders(req)
 	res, err := a.client.Do(req)
+	maybeTrace(req, res, a.trace)
 	if err != nil {
 		return SecureBundle{}, fmt.Errorf("failed get secure bundle for database id %s with: %w", databaseID, err)
 	}
@@ -364,6 +445,7 @@ func (a *AuthenticatedClient) TerminateAsync(id string, preparedStateOnly bool) 
 	q.Add("preparedStateOnly", strconv.FormatBool(preparedStateOnly))
 	req.URL.RawQuery = q.Encode()
 	res, err := a.client.Do(req)
+	maybeTrace(req, res, a.trace)
 	if err != nil {
 		return fmt.Errorf("failed to terminate database id %s with: %w", id, err)
 	}
@@ -395,6 +477,7 @@ func (a *AuthenticatedClient) Terminate(id string, preparedStateOnly bool) error
 		}
 		a.setHeaders(req)
 		res, err := a.client.Do(req)
+		maybeTrace(req, res, a.trace)
 		if err != nil {
 			return fmt.Errorf("failed get database id %s with: %w", id, err)
 		}
@@ -442,6 +525,7 @@ func (a *AuthenticatedClient) ParkAsync(databaseID string) error {
 	}
 	a.setHeaders(req)
 	res, err := a.client.Do(req)
+	maybeTrace(req, res, a.trace)
 	if err != nil {
 		return fmt.Errorf("failed to park database id %s with: %w", databaseID, err)
 	}
@@ -477,6 +561,7 @@ func (a *AuthenticatedClient) UnparkAsync(databaseID string) error {
 	}
 	a.setHeaders(req)
 	res, err := a.client.Do(req)
+	maybeTrace(req, res, a.trace)
 	if err != nil {
 		return fmt.Errorf("failed to unpark database id %s with: %w", databaseID, err)
 	}
@@ -514,6 +599,7 @@ func (a *AuthenticatedClient) Resize(databaseID string, capacityUnits int32) err
 	}
 	a.setHeaders(req)
 	res, err := a.client.Do(req)
+	maybeTrace(req, res, a.trace)
 	if err != nil {
 		return fmt.Errorf("failed to unpark database id %s with: %w", databaseID, err)
 	}
@@ -542,6 +628,7 @@ func (a *AuthenticatedClient) ResetPassword(databaseID, username, password strin
 	}
 	a.setHeaders(req)
 	res, err := a.client.Do(req)
+	maybeTrace(req, res, a.trace)
 	if err != nil {
 		return fmt.Errorf("failed to reset password for database id %s with: %w", databaseID, err)
 	}
@@ -563,6 +650,7 @@ func (a *AuthenticatedClient) GetTierInfo() ([]TierInfo, error) {
 	a.setHeaders(req)
 
 	res, err := a.client.Do(req)
+	maybeTrace(req, res, a.trace)
 	if err != nil {
 		return []TierInfo{}, fmt.Errorf("failed listing tier info with: %w", err)
 	}

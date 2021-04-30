@@ -40,7 +40,7 @@ func TestTokenLogin(t *testing.T) {
 		log.Fatal(err)
 	}
 
-	client := AuthenticateToken(strings.Trim(string(b), "\n"), true)
+	client := AuthenticateToken(strings.Trim(string(b), "\n"), true, TracePrivate)
 	_, err = client.ListDb("", "", "", 10)
 	if err != nil {
 		t.Fatalf("failed authentication '%v'", err)
@@ -152,7 +152,7 @@ func generateString() (string, error) {
 
 func generateDB(t *testing.T, name string, tier string) (*AuthenticatedClient, string) {
 	c := getClientInfo()
-	client, err := Authenticate(c, true)
+	client, err := Authenticate(c, true, TracePrivate)
 	if err != nil {
 		t.Fatalf("failed authentication %v", err)
 	}
