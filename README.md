@@ -1,5 +1,3 @@
-DEPRECATED use https://github.com/datastax/astra-client-go instead
-
 # astra-devops-sdk-go
 
 [![.github/workflows/go.yaml](https://github.com/rsds143/astra-devops-sdk-go/actions/workflows/go.yaml/badge.svg)](https://github.com/rsds143/astra-devops-sdk-go/actions/workflows/go.yaml)
@@ -27,24 +25,6 @@ func main() {
 }
 ```
 
-### Login Legacy Service Account
-
-```go
-
-import "github.com/rsds143/astra-devops-sdk-go/astraops"
-
-func main() {
-//using a legacy service account
- c :=  ClientInfo {
-	        ClientName: "me@example.com",
-	        ClientID:   "3e241be3-2a5f-4cb1-b702-739e38975b1a",
-	        ClientSecret: "33c338b0-91b5-45a6-be14-416059deb820",
-  }
-  verbose := true
-  client, err := astraopsv1.Authenticate(c, verbose)
-}
-```
-
 #### Create Database
 
 Will block until creation
@@ -57,8 +37,6 @@ createDb := CreateDb{
 		CloudProvider: "GCP",
 		CapacityUnits: 1,
 		Tier:          "serverless",
-		User:          "myuser",
-		Password:      "mypass",
 	}
 //id is a uuid
 //db is the following type

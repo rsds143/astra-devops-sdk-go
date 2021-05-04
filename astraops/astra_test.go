@@ -18,7 +18,6 @@ package astraops
 import (
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -151,11 +150,8 @@ func generateString() (string, error) {
 }
 
 func generateDB(t *testing.T, name string, tier string) (*AuthenticatedClient, string) {
-	c := getClientInfo()
-	client, err := Authenticate(c, true, TracePrivate)
-	if err != nil {
-		t.Fatalf("failed authentication %v", err)
-	}
+	c := getToken()
+	client := AuthenticateToken(c, true, TracePrivate)
 	pass, err := generateString()
 	if err != nil {
 		t.Fatalf("failed random gen %v", err)
@@ -191,21 +187,17 @@ func terminateDB(t *testing.T, client *AuthenticatedClient, id string) {
 	t.Logf("database %v deleted for test %v", id, t.Name())
 }
 
-func getClientInfo() ClientInfo {
+func getToken() string {
 	u, err := user.Current()
 	if err != nil {
 		log.Fatal(err)
 	}
-	saFile := path.Join(u.HomeDir, ".config", "astra", "sa.json")
+	saFile := path.Join(u.HomeDir, ".config", "astra", "token")
 	b, err := ioutil.ReadFile(saFile)
 	if err != nil {
 		log.Fatal(err)
 	}
-	var clientInfo ClientInfo
-	if err = json.Unmarshal(b, &clientInfo); err != nil {
-		log.Fatalf("unable to convert %s to json object with error %v", saFile, err)
-	}
-	return clientInfo
+	return string(b)
 }
 
 func TestFormatErrors(t *testing.T) {

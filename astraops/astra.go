@@ -20,7 +20,6 @@ package astraops
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -160,48 +159,6 @@ func AuthenticateToken(token string, verbose bool, trace TracingLevel) *Authenti
 		verbose: verbose,
 		trace:   trace,
 	}
-}
-
-// Authenticate returns a client using legacy Service Account. This is not deprecated but one should move to AuthenticateToken
-// * @param clientInfo - classic service account from legacy Astra
-// * @param verbose bool - if true the logging is much more verbose
-// @returns (*AuthenticatedClient , error)
-func Authenticate(clientInfo ClientInfo, verbose bool, trace TracingLevel) (*AuthenticatedClient, error) {
-	url := "https://api.astra.datastax.com/v2/authenticateServiceAccount"
-	body, err := json.Marshal(clientInfo)
-	if err != nil {
-		return &AuthenticatedClient{}, fmt.Errorf("unable to marshal JSON object with: %w", err)
-	}
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
-	if err != nil {
-		return &AuthenticatedClient{}, fmt.Errorf("failed creating request with: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	c := newHTTPClient()
-	res, err := c.Do(req)
-	if err != nil {
-		return &AuthenticatedClient{}, fmt.Errorf("failed listing databases with: %w", err)
-	}
-	maybeTrace(req, res, trace)
-	defer closeBody(res)
-	if res.StatusCode != 200 {
-		return &AuthenticatedClient{}, readErrorFromResponse(res, 200)
-	}
-	var tokenResponse TokenResponse
-	err = json.NewDecoder(res.Body).Decode(&tokenResponse)
-	if err != nil {
-		return &AuthenticatedClient{}, fmt.Errorf("unable to decode response with error: %w", err)
-	}
-	if tokenResponse.Token == "" {
-		return &AuthenticatedClient{}, errors.New("empty token in token response")
-	}
-	return &AuthenticatedClient{
-		client:  c,
-		token:   fmt.Sprintf("Bearer %s", tokenResponse.Token),
-		verbose: verbose,
-		trace:   trace,
-	}, nil
 }
 
 // AuthenticatedClient has a token and the methods to query the Astra DevOps API
@@ -679,10 +636,6 @@ type DatabaseInfo struct {
 	CapacityUnits int32 `json:"capacityUnits,omitempty"`
 	// Region refers to the cloud region.
 	Region string `json:"region,omitempty"`
-	// User is the user to access the database
-	User string `json:"user,omitempty"`
-	// Password for the user to access the database
-	Password string `json:"password,omitempty"`
 	// Additional keyspaces names in database
 	AdditionalKeyspaces []string `json:"additionalKeyspaces,omitempty"`
 }
