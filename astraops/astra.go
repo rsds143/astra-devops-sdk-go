@@ -29,8 +29,12 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
+
+// DefaultProgressToken when using the synchronous methods
+const DefaultProgressToken = "."
 
 // ClientInfo is a handy type for consumers but not used internally in the library other than for testing
 type ClientInfo struct {
@@ -130,12 +134,13 @@ func logRequest(req *http.Request, trace TracingLevel) {
 func logResponse(res *http.Response) {
 	var loggedResponse LoggedResponse
 	loggedResponse.Headers = res.Header
-	bytes, err := ioutil.ReadAll(res.Body)
+	body, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		log.Printf("HTTP TRACE RESPONSE ERROR - unable to write response body with error '%v'", err)
 	}
-	if len(bytes) > 0 && err == nil {
-		loggedResponse.Body = string(bytes)
+	res.Body = ioutil.NopCloser(bytes.NewBuffer(body))
+	if len(body) > 0 && err == nil {
+		loggedResponse.Body = string(body)
 	}
 	loggedResponse.Status = res.Status
 	loggedResponse.StatusCode = res.StatusCode
@@ -155,10 +160,12 @@ func maybeTrace(req *http.Request, res *http.Response, trace TracingLevel) {
 // @returns (*AuthenticatedClient , error)
 func AuthenticateToken(token string, verbose bool, trace TracingLevel) *AuthenticatedClient {
 	return &AuthenticatedClient{
-		client:  newHTTPClient(),
-		token:   fmt.Sprintf("Bearer %s", token),
-		verbose: verbose,
-		trace:   trace,
+		client:             newHTTPClient(),
+		token:              fmt.Sprintf("Bearer %s", token),
+		verbose:            verbose,
+		trace:              trace,
+		progressToken:      DefaultProgressToken,
+		progressTokenMutex: &sync.RWMutex{},
 	}
 }
 
@@ -197,23 +204,32 @@ func Authenticate(clientInfo ClientInfo, verbose bool, trace TracingLevel) (*Aut
 		return &AuthenticatedClient{}, errors.New("empty token in token response")
 	}
 	return &AuthenticatedClient{
-		client:  c,
-		token:   fmt.Sprintf("Bearer %s", tokenResponse.Token),
-		verbose: verbose,
-		trace:   trace,
+		client:             c,
+		token:              fmt.Sprintf("Bearer %s", tokenResponse.Token),
+		verbose:            verbose,
+		trace:              trace,
+		progressToken:      DefaultProgressToken,
+		progressTokenMutex: &sync.RWMutex{},
 	}, nil
 }
 
 // AuthenticatedClient has a token and the methods to query the Astra DevOps API
 type AuthenticatedClient struct {
-	token   string
-	client  *http.Client
-	verbose bool
-	trace   TracingLevel
+	token              string
+	client             *http.Client
+	verbose            bool
+	trace              TracingLevel
+	progressToken      string
+	progressTokenMutex *sync.RWMutex
 }
 
 const serviceURL = "https://api.astra.datastax.com/v2/databases"
 
+func (a *AuthenticatedClient) SetProgressToken(progressToken string) {
+	defer a.progressTokenMutex.Unlock()
+	a.progressTokenMutex.Lock()
+	a.progressToken = progressToken
+}
 func (a *AuthenticatedClient) setHeaders(req *http.Request) {
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", a.token)
@@ -235,7 +251,9 @@ func (a *AuthenticatedClient) WaitUntil(id string, tries int, intervalSeconds in
 			if a.verbose {
 				log.Printf("db %s not able to be found with error '%v' trying again %v more times", id, err, tries-i-1)
 			} else {
-				log.Printf("waiting")
+				a.progressTokenMutex.RLock()
+				log.Printf(a.progressToken)
+				a.progressTokenMutex.RUnlock()
 			}
 			continue
 		}
@@ -245,7 +263,9 @@ func (a *AuthenticatedClient) WaitUntil(id string, tries int, intervalSeconds in
 		if a.verbose {
 			log.Printf("db %s in state %v but expected %v trying again %v more times", id, db.Status, status, tries-i-1)
 		} else {
-			log.Printf("waiting")
+			a.progressTokenMutex.RLock()
+			log.Printf(a.progressToken)
+			a.progressTokenMutex.RUnlock()
 		}
 	}
 	return Database{}, fmt.Errorf("unable to find db id %s with status %s after %v seconds", id, status, intervalSeconds*tries)
@@ -289,7 +309,7 @@ func (a *AuthenticatedClient) ListDb(include string, provider string, startingAf
 	}
 	err = json.NewDecoder(res.Body).Decode(&dbs)
 	if err != nil {
-		return []Database{}, fmt.Errorf("unable to decode response with error: %v", err)
+		return []Database{}, fmt.Errorf("unable to decode response with error: %w", err)
 	}
 	return dbs, nil
 }
